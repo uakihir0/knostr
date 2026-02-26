@@ -1,0 +1,12 @@
+*.iml
+.idea
+.gradle
+.gradle-home
+.kotlin
+.prompts
+target/
+build/
+out/
+secrets.json
+kotlin-js-store
+/local.properties
