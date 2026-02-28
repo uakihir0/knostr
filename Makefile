@@ -1,7 +1,7 @@
 build:
 	./gradlew \
-	core:clean social:clean \
-	core:assemble social:assemble \
+	cipher:clean core:clean social:clean \
+	cipher:assemble core:assemble social:assemble \
 	-x check --refresh-dependencies
 
 pods:

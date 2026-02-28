@@ -12,6 +12,7 @@ plugins {
 }
 
 rootProject.name = "knostr"
+include("cipher")
 include("core")
 include("social")
 
