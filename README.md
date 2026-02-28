@@ -13,9 +13,10 @@ with [Kotlin Multiplatform](https://kotlinlang.org/docs/multiplatform.html).**
 It depends on [khttpclient] and uses Ktor Client internally. Therefore, this library can be used on any platform
 supported by Kotlin Multiplatform and Ktor Client. The behavior on each platform depends on [khttpclient].
 
-knostr provides two modules:
+knostr provides three modules:
+- **cipher** — Pure Kotlin secp256k1 / BIP-340 Schnorr implementation (zero external dependencies, all platforms)
 - **core** — Low-level Nostr protocol operations (events, relay connections, signing, NIP utilities)
-- **social** — High-level social abstraction layer (feeds, users, reactions, search, zaps, media upload, streaming)
+- **social** — High-level social abstraction layer (feeds, users, reactions, search, zaps, media upload, mutes, streaming)
 
 ## Usage
 
@@ -80,7 +81,7 @@ response.data.forEach { event ->
 }
 ```
 
-### Posting a Note (Social)
+### Posting & Feed (Social)
 
 ```kotlin
 val social = NostrSocialFactory.instance(nostr)
@@ -94,11 +95,25 @@ social.feed().reply(
     replyToEventId = "target-event-id",
 )
 
-// Like a note
-social.reactions().like(
-    eventId = "target-event-id",
-    authorPubkey = "target-author-pubkey",
-)
+// Repost a note (kind:6)
+social.feed().repost("target-event-id")
+
+// Get a single note by ID
+val note = social.feed().getNote("event-id").data
+
+// Get a user's feed
+val notes = social.feed().getUserFeed("pubkey-hex", limit = 20).data
+
+// Get mentions (notes mentioning the authenticated user)
+val mentions = social.feed().getMentions(limit = 20).data
+
+// Get a thread (root note + ancestors + replies)
+val thread = social.feed().getThread("event-id").data
+println("Root: ${thread.rootNote?.content}")
+println("Replies: ${thread.replies.size}")
+
+// Delete a note
+social.feed().delete("event-id", "reason")
 ```
 
 ### User Profile (Social)
@@ -112,6 +127,58 @@ println("${user.name}: ${user.about}")
 
 // Get following list
 val following = social.users().getFollowing("pubkey-hex").data
+
+// Get followers (kind:3 reverse lookup)
+val followers = social.users().getFollowers("pubkey-hex", limit = 100).data
+
+// Get multiple profiles at once
+val users = social.users().getProfiles(listOf("pubkey1", "pubkey2")).data
+
+// Follow / unfollow
+social.users().follow("pubkey-hex")
+social.users().unfollow("pubkey-hex")
+
+// NIP-05 verification
+val verified = social.users().verifyNip05("user@example.com").data
+```
+
+### Reactions (Social)
+
+```kotlin
+val social = NostrSocialFactory.instance(nostr)
+
+// Like a note
+social.reactions().like(
+    eventId = "target-event-id",
+    authorPubkey = "target-author-pubkey",
+)
+
+// Custom reaction
+social.reactions().react("event-id", "author-pubkey", "🤙")
+
+// Unlike (find own like and delete via kind:5)
+social.reactions().unlike("target-event-id")
+
+// Get reactions for a note
+val reactions = social.reactions().getReactions("event-id").data
+
+// Get a user's reaction history
+val userReactions = social.reactions().getUserReactions("pubkey-hex", limit = 20).data
+```
+
+### Mute (Social)
+
+```kotlin
+val social = NostrSocialFactory.instance(nostr)
+
+// Mute a user (NIP-51 kind:10000)
+social.mutes().mute("target-pubkey-hex")
+
+// Unmute a user
+social.mutes().unmute("target-pubkey-hex")
+
+// Get mute list
+val mutedPubkeys = social.mutes().getMuteList().data
 ```
 
 ### Real-time Timeline (Social)
@@ -175,32 +242,50 @@ val entity = nostr.nip().decodeNip19("npub1...")
 val result = nostr.nip().resolveNip05("user@example.com")
 ```
 
+## Social API Overview
+
+| Resource | Methods | Description |
+|----------|---------|-------------|
+| `feed()` | `post`, `reply`, `repost`, `delete`, `getNote`, `getUserFeed`, `getHomeFeed`, `getMentions`, `getThread` | Feed & timeline management |
+| `users()` | `getProfile`, `getProfiles`, `updateProfile`, `follow`, `unfollow`, `getFollowing`, `getFollowers`, `verifyNip05` | User profile management |
+| `reactions()` | `like`, `unlike`, `react`, `unreact`, `getReactions`, `getUserReactions` | Reactions & likes |
+| `search()` | `searchNotes`, `searchUsers` | Content search (NIP-50) |
+| `zaps()` | `createZapRequest`, `getZapsForEvent`, `getZapsForUser`, `getLnurlPayInfo` | Lightning Zaps (NIP-57) |
+| `media()` | `upload`, `getServerInfo` | File upload (NIP-96) |
+| `mutes()` | `mute`, `unmute`, `getMuteList` | User muting (NIP-51) |
+
+All methods have both `suspend` (async) and `Blocking` (sync) variants.
+
 ## Supported NIPs
 
 | NIP | Description | Status |
 |-----|-------------|--------|
 | NIP-01 | Basic protocol | Implemented |
+| NIP-02 | Follow list (kind:3) | Implemented |
 | NIP-05 | DNS identity verification | Implemented |
+| NIP-09 | Event deletion (kind:5) | Implemented |
 | NIP-10 | Reply threading (e-tag markers) | Implemented |
+| NIP-18 | Reposts (kind:6) | Implemented |
 | NIP-19 | Bech32 encoding (npub, nsec, note) | Implemented |
-| NIP-25 | Reactions | Implemented |
+| NIP-25 | Reactions (kind:7) | Implemented |
 | NIP-50 | Search | Implemented |
+| NIP-51 | Mute list (kind:10000) | Implemented |
 | NIP-57 | Lightning Zaps | Implemented |
 | NIP-96 | File upload | Implemented |
 | NIP-98 | HTTP Auth (for NIP-96) | Implemented |
 
 ## Platform Support
 
-| Platform | Core | Social | Signing |
-|----------|------|--------|---------|
-| JVM | Yes | Yes | Yes |
-| iOS/macOS | Yes | Yes | Yes |
-| Linux x64 | Yes | - | Yes |
-| JS (Node/Browser) | Yes | Yes | No |
-| Windows (mingwX64) | Yes | Yes | No |
+| Platform | Cipher | Core | Social | Signing |
+|----------|--------|------|--------|---------|
+| JVM | Yes | Yes | Yes | Yes |
+| iOS/macOS | Yes | Yes | Yes | Yes |
+| Linux x64 | Yes | Yes | - | Yes |
+| JS (Node/Browser) | Yes | Yes | Yes | Yes |
+| Windows (mingwX64) | Yes | Yes | Yes | Yes |
 
-> Signing (Schnorr/BIP-340) currently requires `secp256k1-kmp` which is only available on JVM, Apple, and Linux.
-> On JS and Windows, use `NostrConfig` with a custom `NostrSigner` implementation.
+> The cipher module provides a pure Kotlin implementation of secp256k1 / BIP-340 Schnorr signatures,
+> enabling event signing on all platforms without native dependencies.
 
 ## License
 

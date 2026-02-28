@@ -11,9 +11,10 @@
 そのため、本ライブラリは、Kotlin Multiplatform かつ Ktor Client がサポートしているプラットフォームであれば利用可能です。
 各プラットフォームでどのような挙動をするのかについては、[khttpclient] に依存します。
 
-knostr は 2 つのモジュールを提供します:
+knostr は 3 つのモジュールを提供します:
+- **cipher** — 純粋な Kotlin による secp256k1 / BIP-340 Schnorr 実装 (外部依存なし、全プラットフォーム対応)
 - **core** — Nostr プロトコルの低レベル操作 (イベント、リレー接続、署名、NIP ユーティリティ)
-- **social** — ソーシャル機能の高レベル抽象化レイヤー (フィード、ユーザー、リアクション、検索、Zap、メディアアップロード、ストリーミング)
+- **social** — ソーシャル機能の高レベル抽象化レイヤー (フィード、ユーザー、リアクション、検索、Zap、メディアアップロード、ミュート、ストリーミング)
 
 ## 使い方
 
@@ -79,7 +80,7 @@ response.data.forEach { event ->
 }
 ```
 
-### ノートの投稿 (Social)
+### 投稿とフィード (Social)
 
 ```kotlin
 val social = NostrSocialFactory.instance(nostr)
@@ -93,11 +94,25 @@ social.feed().reply(
     replyToEventId = "target-event-id",
 )
 
-// ノートにいいね
-social.reactions().like(
-    eventId = "target-event-id",
-    authorPubkey = "target-author-pubkey",
-)
+// リポスト (kind:6)
+social.feed().repost("target-event-id")
+
+// ID でノートを取得
+val note = social.feed().getNote("event-id").data
+
+// ユーザーのフィードを取得
+val notes = social.feed().getUserFeed("pubkey-hex", limit = 20).data
+
+// メンション (自分宛てのノート) を取得
+val mentions = social.feed().getMentions(limit = 20).data
+
+// スレッドを取得 (ルートノート + 祖先 + リプライ)
+val thread = social.feed().getThread("event-id").data
+println("ルート: ${thread.rootNote?.content}")
+println("リプライ: ${thread.replies.size}")
+
+// ノートを削除
+social.feed().delete("event-id", "理由")
 ```
 
 ### ユーザープロフィール (Social)
@@ -111,6 +126,58 @@ println("${user.name}: ${user.about}")
 
 // フォローリストを取得
 val following = social.users().getFollowing("pubkey-hex").data
+
+// フォロワーを取得 (kind:3 逆引き)
+val followers = social.users().getFollowers("pubkey-hex", limit = 100).data
+
+// 複数プロフィールを一括取得
+val users = social.users().getProfiles(listOf("pubkey1", "pubkey2")).data
+
+// フォロー / アンフォロー
+social.users().follow("pubkey-hex")
+social.users().unfollow("pubkey-hex")
+
+// NIP-05 検証
+val verified = social.users().verifyNip05("user@example.com").data
+```
+
+### リアクション (Social)
+
+```kotlin
+val social = NostrSocialFactory.instance(nostr)
+
+// いいね
+social.reactions().like(
+    eventId = "target-event-id",
+    authorPubkey = "target-author-pubkey",
+)
+
+// カスタムリアクション
+social.reactions().react("event-id", "author-pubkey", "🤙")
+
+// いいね取り消し (自分の kind:7 を kind:5 で削除)
+social.reactions().unlike("target-event-id")
+
+// ノートのリアクション一覧を取得
+val reactions = social.reactions().getReactions("event-id").data
+
+// ユーザーのリアクション履歴を取得
+val userReactions = social.reactions().getUserReactions("pubkey-hex", limit = 20).data
+```
+
+### ミュート (Social)
+
+```kotlin
+val social = NostrSocialFactory.instance(nostr)
+
+// ユーザーをミュート (NIP-51 kind:10000)
+social.mutes().mute("target-pubkey-hex")
+
+// ミュート解除
+social.mutes().unmute("target-pubkey-hex")
+
+// ミュートリストを取得
+val mutedPubkeys = social.mutes().getMuteList().data
 ```
 
 ### リアルタイムタイムライン (Social)
@@ -174,32 +241,50 @@ val entity = nostr.nip().decodeNip19("npub1...")
 val result = nostr.nip().resolveNip05("user@example.com")
 ```
 
+## Social API 一覧
+
+| リソース | メソッド | 説明 |
+|---------|---------|------|
+| `feed()` | `post`, `reply`, `repost`, `delete`, `getNote`, `getUserFeed`, `getHomeFeed`, `getMentions`, `getThread` | フィード・タイムライン管理 |
+| `users()` | `getProfile`, `getProfiles`, `updateProfile`, `follow`, `unfollow`, `getFollowing`, `getFollowers`, `verifyNip05` | ユーザープロフィール管理 |
+| `reactions()` | `like`, `unlike`, `react`, `unreact`, `getReactions`, `getUserReactions` | リアクション・いいね |
+| `search()` | `searchNotes`, `searchUsers` | コンテンツ検索 (NIP-50) |
+| `zaps()` | `createZapRequest`, `getZapsForEvent`, `getZapsForUser`, `getLnurlPayInfo` | Lightning Zaps (NIP-57) |
+| `media()` | `upload`, `getServerInfo` | ファイルアップロード (NIP-96) |
+| `mutes()` | `mute`, `unmute`, `getMuteList` | ユーザーミュート (NIP-51) |
+
+全メソッドに `suspend` (非同期) と `Blocking` (同期) の両方があります。
+
 ## 対応 NIP
 
 | NIP | 説明 | 状態 |
 |-----|------|------|
 | NIP-01 | 基本プロトコル | 実装済み |
+| NIP-02 | フォローリスト (kind:3) | 実装済み |
 | NIP-05 | DNS ベースの ID 検証 | 実装済み |
+| NIP-09 | イベント削除 (kind:5) | 実装済み |
 | NIP-10 | リプライスレッド (e-tag マーカー) | 実装済み |
+| NIP-18 | リポスト (kind:6) | 実装済み |
 | NIP-19 | Bech32 エンコーディング (npub, nsec, note) | 実装済み |
-| NIP-25 | リアクション | 実装済み |
+| NIP-25 | リアクション (kind:7) | 実装済み |
 | NIP-50 | 検索 | 実装済み |
+| NIP-51 | ミュートリスト (kind:10000) | 実装済み |
 | NIP-57 | Lightning Zaps | 実装済み |
 | NIP-96 | ファイルアップロード | 実装済み |
 | NIP-98 | HTTP 認証 (NIP-96 用) | 実装済み |
 
 ## プラットフォームサポート
 
-| プラットフォーム | Core | Social | 署名 |
-|-----------------|------|--------|------|
-| JVM | Yes | Yes | Yes |
-| iOS/macOS | Yes | Yes | Yes |
-| Linux x64 | Yes | - | Yes |
-| JS (Node/Browser) | Yes | Yes | No |
-| Windows (mingwX64) | Yes | Yes | No |
+| プラットフォーム | Cipher | Core | Social | 署名 |
+|-----------------|--------|------|--------|------|
+| JVM | Yes | Yes | Yes | Yes |
+| iOS/macOS | Yes | Yes | Yes | Yes |
+| Linux x64 | Yes | Yes | - | Yes |
+| JS (Node/Browser) | Yes | Yes | Yes | Yes |
+| Windows (mingwX64) | Yes | Yes | Yes | Yes |
 
-> 署名 (Schnorr/BIP-340) は現在 `secp256k1-kmp` を使用しており、JVM, Apple, Linux でのみ利用可能です。
-> JS と Windows では、`NostrConfig` にカスタム `NostrSigner` 実装を設定して使用してください。
+> cipher モジュールが純粋な Kotlin による secp256k1 / BIP-340 Schnorr 署名を提供するため、
+> ネイティブ依存なしで全プラットフォームでイベント署名が可能です。
 
 ## ライセンス
 
