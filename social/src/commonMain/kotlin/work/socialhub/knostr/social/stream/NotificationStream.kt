@@ -1,5 +1,3 @@
-@file:Suppress("DEPRECATION")
-
 package work.socialhub.knostr.social.stream
 
 import work.socialhub.knostr.EventKind
@@ -9,7 +7,7 @@ import work.socialhub.knostr.social.internal.SocialMapper
 import work.socialhub.knostr.social.model.NostrNote
 import work.socialhub.knostr.social.model.NostrReaction
 import work.socialhub.knostr.entity.NostrEvent
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 
 /**
  * Real-time notification stream.

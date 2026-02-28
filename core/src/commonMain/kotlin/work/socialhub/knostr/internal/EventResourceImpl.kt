@@ -1,10 +1,8 @@
-@file:Suppress("DEPRECATION")
-
 package work.socialhub.knostr.internal
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeout
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.NostrConfig
 import work.socialhub.knostr.NostrException

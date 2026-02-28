@@ -1,5 +1,3 @@
-@file:Suppress("DEPRECATION")
-
 package work.socialhub.knostr.social.internal
 
 import work.socialhub.knostr.EventKind
@@ -12,7 +10,7 @@ import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.social.api.FeedResource
 import work.socialhub.knostr.social.model.NostrNote
 import work.socialhub.knostr.util.toBlocking
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 
 class FeedResourceImpl(
     private val nostr: Nostr,
