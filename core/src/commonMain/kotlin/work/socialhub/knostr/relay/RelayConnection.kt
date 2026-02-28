@@ -1,8 +1,5 @@
 package work.socialhub.knostr.relay
 
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.internal.InternalUtility
@@ -50,14 +47,6 @@ class RelayConnection(
     /** Open WebSocket connection (suspending) */
     suspend fun open() {
         client.open()
-    }
-
-    /** Open WebSocket connection asynchronously */
-    @OptIn(DelicateCoroutinesApi::class)
-    fun openAsync() {
-        GlobalScope.launch {
-            client.open()
-        }
     }
 
     /** Close WebSocket connection */

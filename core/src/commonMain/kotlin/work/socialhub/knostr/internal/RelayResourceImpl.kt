@@ -1,5 +1,6 @@
 package work.socialhub.knostr.internal
 
+import kotlinx.coroutines.coroutineScope
 import work.socialhub.knostr.NostrConfig
 import work.socialhub.knostr.api.RelayResource
 import work.socialhub.knostr.relay.RelayPool
@@ -17,7 +18,9 @@ class RelayResourceImpl(
                 relayPool.addRelay(url)
             }
         }
-        relayPool.connectAll()
+        coroutineScope {
+            relayPool.connectAll(this)
+        }
     }
 
     override suspend fun disconnect() {

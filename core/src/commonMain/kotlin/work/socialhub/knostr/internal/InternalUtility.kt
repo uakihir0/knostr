@@ -9,6 +9,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import work.socialhub.knostr.NostrException
 import work.socialhub.knostr.entity.NostrEvent
+import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.relay.RelayMessage
 import work.socialhub.knostr.util.Hex
 
@@ -121,12 +122,12 @@ object InternalUtility {
     /**
      * Build a client REQ message: ["REQ", subscription_id, filter1, filter2, ...]
      */
-    fun buildReqMessage(subscriptionId: String, filters: List<Any>): String {
+    fun buildReqMessage(subscriptionId: String, filters: List<NostrFilter>): String {
         val sb = StringBuilder()
         sb.append("""["REQ","$subscriptionId"""")
         for (filter in filters) {
             sb.append(",")
-            sb.append(json.encodeToString(filter as kotlinx.serialization.Serializable))
+            sb.append(json.encodeToString(filter))
         }
         sb.append("]")
         return sb.toString()

@@ -13,6 +13,8 @@ import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.internal.InternalUtility
 import work.socialhub.knostr.social.api.UserResource
 import work.socialhub.knostr.social.model.NostrUser
+import work.socialhub.knostr.util.Bech32
+import work.socialhub.knostr.util.Hex
 import work.socialhub.knostr.util.toBlocking
 import kotlinx.datetime.Clock
 
@@ -28,7 +30,14 @@ class UserResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val event = response.data.firstOrNull()
-            ?: throw NostrException("Profile not found for pubkey: $pubkey")
+        if (event == null) {
+            // Return minimal user with just pubkey when profile not found
+            val user = NostrUser().apply {
+                this.pubkey = pubkey
+                this.npub = Bech32.encode("npub", Hex.decode(pubkey))
+            }
+            return Response(user)
+        }
 
         return Response(SocialMapper.toUser(event))
     }

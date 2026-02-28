@@ -45,8 +45,8 @@ class EventResourceImpl(
                 withTimeout(config.queryTimeoutMs) {
                     eoseDeferred.await()
                 }
-            } catch (_: Exception) {
-                // Timeout: return what we have
+            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                // Timeout: return what we have so far
             } finally {
                 relayPool.unsubscribe(subId)
             }
