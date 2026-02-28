@@ -10,7 +10,7 @@ class ECMathTest {
     @Test
     fun testGeneratorPointOnCurve() {
         // Verify G.y^2 == G.x^3 + 7 mod p
-        val field = Secp256k1Curve.field
+        val field = Secp256k1Field
         val g = ECMath.G
         val y2 = field.mul(g.y, g.y)
         val x3 = field.mul(field.mul(g.x, g.x), g.x)
@@ -73,7 +73,7 @@ class ECMathTest {
         // liftX returns even y
         assertTrue(lifted.y.isEven())
         // Should be the same y or p - y
-        val field = Secp256k1Curve.field
+        val field = Secp256k1Field
         assertTrue(lifted.y == g.y || lifted.y == field.neg(g.y))
     }
 
@@ -88,7 +88,7 @@ class ECMathTest {
     fun testAddInverse() {
         // P + (-P) = Infinity
         val g = ECMath.G
-        val negG = ECPoint.Affine(g.x, Secp256k1Curve.field.neg(g.y))
+        val negG = ECPoint.Affine(g.x, Secp256k1Field.neg(g.y))
         val result = ECMath.add(g, negG)
         assertTrue(result is ECPoint.Infinity)
     }
@@ -100,7 +100,7 @@ class ECMathTest {
         val result = ECMath.multiply(privKey, ECMath.G)
         assertTrue(result is ECPoint.Affine)
         // Just verify it produces a valid point (non-zero, on curve)
-        val field = Secp256k1Curve.field
+        val field = Secp256k1Field
         val y2 = field.mul(result.y, result.y)
         val x3 = field.mul(field.mul(result.x, result.x), result.x)
         val rhs = field.add(x3, UInt256.fromHex("0000000000000000000000000000000000000000000000000000000000000007"))

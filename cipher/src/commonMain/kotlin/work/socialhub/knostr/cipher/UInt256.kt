@@ -21,6 +21,11 @@ class UInt256 internal constructor(
         val TWO = UInt256(UIntArray(8).also { it[7] = 2u })
         val THREE = UInt256(UIntArray(8).also { it[7] = 3u })
 
+        fun fromInt(v: Int): UInt256 {
+            require(v >= 0) { "fromInt requires non-negative value" }
+            return UInt256(UIntArray(8).also { it[7] = v.toUInt() })
+        }
+
         fun fromByteArray(bytes: ByteArray): UInt256 {
             require(bytes.size == 32) { "Expected 32 bytes, got ${bytes.size}" }
             val w = UIntArray(8)

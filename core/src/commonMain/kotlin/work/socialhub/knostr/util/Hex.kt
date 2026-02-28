@@ -14,7 +14,7 @@ object Hex {
             result[i * 2] = hexChars[v ushr 4]
             result[i * 2 + 1] = hexChars[v and 0x0F]
         }
-        return String(result)
+        return result.concatToString()
     }
 
     fun decode(hex: String): ByteArray {

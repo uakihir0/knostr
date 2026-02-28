@@ -6,7 +6,6 @@ package work.socialhub.knostr.cipher
  */
 object Secp256k1 {
 
-    private val field = Secp256k1Curve.field
     private val scalar = Secp256k1Curve.scalar
     private val n = Secp256k1Curve.N
     private val p = Secp256k1Curve.P
@@ -118,7 +117,7 @@ object Secp256k1 {
         val sG = ECMath.multiply(s, ECMath.G)
         val eP = ECMath.multiply(e, pPoint)
         val negEP = when (eP) {
-            is ECPoint.Affine -> ECPoint.Affine(eP.x, field.neg(eP.y))
+            is ECPoint.Affine -> ECPoint.Affine(eP.x, Secp256k1Field.neg(eP.y))
             is ECPoint.Infinity -> ECPoint.Infinity
         }
         val rPoint = ECMath.add(sG, negEP)
