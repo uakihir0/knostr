@@ -3,9 +3,11 @@ package work.socialhub.knostr.social.internal
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.social.NostrSocial
 import work.socialhub.knostr.social.api.FeedResource
+import work.socialhub.knostr.social.api.MediaResource
 import work.socialhub.knostr.social.api.ReactionResource
 import work.socialhub.knostr.social.api.SearchResource
 import work.socialhub.knostr.social.api.UserResource
+import work.socialhub.knostr.social.api.ZapResource
 
 class NostrSocialImpl(
     private val nostr: Nostr,
@@ -15,10 +17,14 @@ class NostrSocialImpl(
     private val users: UserResource = UserResourceImpl(nostr)
     private val reactions: ReactionResource = ReactionResourceImpl(nostr)
     private val search: SearchResource = SearchResourceImpl(nostr)
+    private val media: MediaResource = MediaResourceImpl(nostr)
+    private val zaps: ZapResource = ZapResourceImpl(nostr)
 
     override fun feed() = feed
     override fun users() = users
     override fun reactions() = reactions
     override fun search() = search
+    override fun media() = media
+    override fun zaps() = zaps
     override fun nostr() = nostr
 }

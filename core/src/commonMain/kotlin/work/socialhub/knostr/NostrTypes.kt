@@ -12,5 +12,8 @@ object EventKind {
     const val EVENT_DELETION = 5
     const val REPOST = 6
     const val REACTION = 7
+    const val ZAP_REQUEST = 9734
+    const val ZAP_RECEIPT = 9735
+    const val FILE_METADATA = 1063
     const val RELAY_LIST = 10002
 }

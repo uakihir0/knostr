@@ -7,6 +7,7 @@ import work.socialhub.knostr.internal.InternalUtility
 import work.socialhub.knostr.social.model.NostrNote
 import work.socialhub.knostr.social.model.NostrReaction
 import work.socialhub.knostr.social.model.NostrUser
+import work.socialhub.knostr.social.model.NostrZap
 import work.socialhub.knostr.util.Bech32
 import work.socialhub.knostr.util.Hex
 
@@ -78,6 +79,65 @@ object SocialMapper {
                     targetEventId = tag[1]
                 }
             }
+        }
+    }
+
+    /** Map a kind:9735 event to NostrZap */
+    fun toZap(event: NostrEvent): NostrZap? {
+        return try {
+            val zap = NostrZap()
+            zap.event = event
+            zap.createdAt = event.createdAt
+
+            for (tag in event.tags) {
+                if (tag.size < 2) continue
+                when (tag[0]) {
+                    "p" -> zap.recipientPubkey = tag[1]
+                    "e" -> zap.targetEventId = tag[1]
+                    "bolt11" -> {
+                        // Extract amount from bolt11 invoice
+                        zap.amountMilliSats = parseBolt11Amount(tag[1])
+                    }
+                    "description" -> {
+                        // The zap request event is embedded in the description tag
+                        try {
+                            val zapRequest = InternalUtility.fromJson<NostrEvent>(tag[1])
+                            zap.message = zapRequest.content
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+            }
+            zap
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Parse amount from a bolt11 invoice string.
+     * bolt11 invoices encode amount after "lnbc" prefix.
+     * e.g., "lnbc10n..." = 10 sats, "lnbc1m..." = 0.001 BTC
+     */
+    private fun parseBolt11Amount(bolt11: String): Long {
+        val lower = bolt11.lowercase()
+        if (!lower.startsWith("lnbc")) return 0
+
+        val amountStr = lower.removePrefix("lnbc")
+        val multiplierIdx = amountStr.indexOfFirst { it.isLetter() }
+        if (multiplierIdx <= 0) return 0
+
+        val numberStr = amountStr.substring(0, multiplierIdx)
+        val multiplier = amountStr[multiplierIdx]
+        val number = numberStr.toLongOrNull() ?: return 0
+
+        // Convert to millisatoshis
+        return when (multiplier) {
+            'm' -> number * 100_000_000L    // milli-BTC -> msats
+            'u' -> number * 100_000L         // micro-BTC -> msats
+            'n' -> number * 100L             // nano-BTC -> msats
+            'p' -> number / 10L              // pico-BTC -> msats
+            else -> 0
         }
     }
 
