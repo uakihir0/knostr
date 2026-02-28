@@ -60,9 +60,11 @@ kotlin {
             implementation(libs.serialization.json)
         }
 
-        // for test (kotlin/jvm)
-        jvmTest.dependencies {
+        commonTest.dependencies {
             implementation(kotlin("test"))
+        }
+
+        jvmTest.dependencies {
             implementation(libs.slf4j.simple)
         }
     }
