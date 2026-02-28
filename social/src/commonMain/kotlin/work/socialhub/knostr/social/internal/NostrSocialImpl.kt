@@ -4,6 +4,7 @@ import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.social.NostrSocial
 import work.socialhub.knostr.social.api.FeedResource
 import work.socialhub.knostr.social.api.MediaResource
+import work.socialhub.knostr.social.api.MuteResource
 import work.socialhub.knostr.social.api.ReactionResource
 import work.socialhub.knostr.social.api.SearchResource
 import work.socialhub.knostr.social.api.UserResource
@@ -19,6 +20,7 @@ class NostrSocialImpl(
     private val search: SearchResource = SearchResourceImpl(nostr)
     private val media: MediaResource = MediaResourceImpl(nostr)
     private val zaps: ZapResource = ZapResourceImpl(nostr)
+    private val mutes: MuteResource = MuteResourceImpl(nostr)
 
     override fun feed() = feed
     override fun users() = users
@@ -26,5 +28,6 @@ class NostrSocialImpl(
     override fun search() = search
     override fun media() = media
     override fun zaps() = zaps
+    override fun mutes() = mutes
     override fun nostr() = nostr
 }

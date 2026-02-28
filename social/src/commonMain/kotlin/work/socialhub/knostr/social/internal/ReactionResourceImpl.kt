@@ -49,6 +49,52 @@ class ReactionResourceImpl(
         return Response(reactions)
     }
 
+    override suspend fun unlike(eventId: String): Response<Boolean> {
+        return deleteOwnReaction(eventId, "+")
+    }
+
+    override suspend fun unreact(eventId: String, content: String?): Response<Boolean> {
+        return deleteOwnReaction(eventId, content)
+    }
+
+    override suspend fun getUserReactions(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrReaction>> {
+        val filter = NostrFilter(
+            authors = listOf(pubkey),
+            kinds = listOf(EventKind.REACTION),
+            since = since,
+            until = until,
+            limit = limit,
+        )
+        val response = nostr.events().queryEvents(listOf(filter))
+        val reactions = response.data.map { SocialMapper.toReaction(it) }
+        return Response(reactions)
+    }
+
+    /**
+     * Find own reaction event for a target eventId and delete it via kind:5.
+     * @param content If non-null, match reaction content (e.g. "+" for like). If null, delete any reaction.
+     */
+    private suspend fun deleteOwnReaction(eventId: String, content: String?): Response<Boolean> {
+        val signer = nostr.signer()
+            ?: throw NostrException("Signer is required to remove reaction")
+
+        // Find own reaction for this event
+        val filter = NostrFilter(
+            authors = listOf(signer.getPublicKey()),
+            kinds = listOf(EventKind.REACTION),
+            eTags = listOf(eventId),
+        )
+        val response = nostr.events().queryEvents(listOf(filter))
+        val reactionEvent = if (content != null) {
+            response.data.find { it.content == content }
+        } else {
+            response.data.firstOrNull()
+        } ?: throw NostrException("No matching reaction found for event: $eventId")
+
+        // Delete via kind:5
+        return nostr.events().deleteEvent(reactionEvent.id)
+    }
+
     override fun likeBlocking(eventId: String, authorPubkey: String): Response<NostrEvent> {
         return toBlocking { like(eventId, authorPubkey) }
     }
@@ -59,5 +105,17 @@ class ReactionResourceImpl(
 
     override fun getReactionsBlocking(eventId: String): Response<List<NostrReaction>> {
         return toBlocking { getReactions(eventId) }
+    }
+
+    override fun unlikeBlocking(eventId: String): Response<Boolean> {
+        return toBlocking { unlike(eventId) }
+    }
+
+    override fun unreactBlocking(eventId: String, content: String?): Response<Boolean> {
+        return toBlocking { unreact(eventId, content) }
+    }
+
+    override fun getUserReactionsBlocking(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrReaction>> {
+        return toBlocking { getUserReactions(pubkey, since, until, limit) }
     }
 }

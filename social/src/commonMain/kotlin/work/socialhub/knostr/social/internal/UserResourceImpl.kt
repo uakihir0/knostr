@@ -114,6 +114,38 @@ class UserResourceImpl(
         return Response(followList)
     }
 
+    override suspend fun getFollowers(pubkey: String, limit: Int): Response<List<String>> {
+        val filter = NostrFilter(
+            pTags = listOf(pubkey),
+            kinds = listOf(EventKind.FOLLOW_LIST),
+            limit = limit,
+        )
+        val response = nostr.events().queryEvents(listOf(filter))
+        // Each matching event's author follows the target pubkey
+        // Deduplicate (one per author, latest wins)
+        val followers = response.data
+            .sortedByDescending { it.createdAt }
+            .distinctBy { it.pubkey }
+            .map { it.pubkey }
+        return Response(followers)
+    }
+
+    override suspend fun getProfiles(pubkeys: List<String>): Response<List<NostrUser>> {
+        if (pubkeys.isEmpty()) return Response(listOf())
+
+        val filter = NostrFilter(
+            authors = pubkeys,
+            kinds = listOf(EventKind.METADATA),
+        )
+        val response = nostr.events().queryEvents(listOf(filter))
+        // Take latest metadata per pubkey
+        val users = response.data
+            .sortedByDescending { it.createdAt }
+            .distinctBy { it.pubkey }
+            .map { SocialMapper.toUser(it) }
+        return Response(users)
+    }
+
     override suspend fun verifyNip05(address: String): Response<Boolean> {
         return try {
             val result = nostr.nip().resolveNip05(address)
@@ -154,6 +186,14 @@ class UserResourceImpl(
 
     override fun getFollowingBlocking(pubkey: String): Response<List<String>> {
         return toBlocking { getFollowing(pubkey) }
+    }
+
+    override fun getFollowersBlocking(pubkey: String, limit: Int): Response<List<String>> {
+        return toBlocking { getFollowers(pubkey, limit) }
+    }
+
+    override fun getProfilesBlocking(pubkeys: List<String>): Response<List<NostrUser>> {
+        return toBlocking { getProfiles(pubkeys) }
     }
 
     override fun verifyNip05Blocking(address: String): Response<Boolean> {

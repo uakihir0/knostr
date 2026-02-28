@@ -24,6 +24,12 @@ interface UserResource {
     /** Get list of pubkeys the user is following */
     suspend fun getFollowing(pubkey: String): Response<List<String>>
 
+    /** Get pubkeys of users who follow the given user (kind:3 reverse lookup) */
+    suspend fun getFollowers(pubkey: String, limit: Int = 100): Response<List<String>>
+
+    /** Get profiles for multiple pubkeys in a single query */
+    suspend fun getProfiles(pubkeys: List<String>): Response<List<NostrUser>>
+
     /** Verify a NIP-05 address */
     suspend fun verifyNip05(address: String): Response<Boolean>
 
@@ -41,6 +47,12 @@ interface UserResource {
 
     @JsExport.Ignore
     fun getFollowingBlocking(pubkey: String): Response<List<String>>
+
+    @JsExport.Ignore
+    fun getFollowersBlocking(pubkey: String, limit: Int = 100): Response<List<String>>
+
+    @JsExport.Ignore
+    fun getProfilesBlocking(pubkeys: List<String>): Response<List<NostrUser>>
 
     @JsExport.Ignore
     fun verifyNip05Blocking(address: String): Response<Boolean>
