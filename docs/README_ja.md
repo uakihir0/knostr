@@ -1,5 +1,3 @@
-> [日本語](./docs/README_ja.md)
-
 # knostr
 
 ![badge][badge-jvm]
@@ -8,18 +6,19 @@
 ![badge][badge-windows]
 ![badge][badge-linux]
 
-**This library is a Nostr protocol client library compatible
-with [Kotlin Multiplatform](https://kotlinlang.org/docs/multiplatform.html).**
-It depends on [khttpclient] and uses Ktor Client internally. Therefore, this library can be used on any platform
-supported by Kotlin Multiplatform and Ktor Client. The behavior on each platform depends on [khttpclient].
+**このライブラリは [Kotlin Multiplatform](https://kotlinlang.org/docs/multiplatform.html) に対応した Nostr プロトコルクライアントライブラリです。**
+[khttpclient] を依存関係に持っており、内部で Ktor Client を使用しています。
+そのため、本ライブラリは、Kotlin Multiplatform かつ Ktor Client がサポートしているプラットフォームであれば利用可能です。
+各プラットフォームでどのような挙動をするのかについては、[khttpclient] に依存します。
 
-knostr provides two modules:
-- **core** — Low-level Nostr protocol operations (events, relay connections, signing, NIP utilities)
-- **social** — High-level social abstraction layer (feeds, users, reactions, search, zaps, media upload, streaming)
+knostr は 2 つのモジュールを提供します:
+- **core** — Nostr プロトコルの低レベル操作 (イベント、リレー接続、署名、NIP ユーティリティ)
+- **social** — ソーシャル機能の高レベル抽象化レイヤー (フィード、ユーザー、リアクション、検索、Zap、メディアアップロード、ストリーミング)
 
-## Usage
+## 使い方
 
-Below is how to use it with Kotlin on the supported platforms using Gradle.
+以下は対応するプラットフォームにおいて Gradle を用いて Kotlin で使用する際の使い方になります。
+また、テストコードも合わせて確認してください。
 
 ### Snapshot
 
@@ -34,11 +33,11 @@ dependencies {
 }
 ```
 
-### Using as part of a regular Java project
+### 通常の Java プロジェクトで使用する場合
 
-All of the above can be added to and used in regular Java projects, too. All you have to do is to use the suffix `-jvm` when listing the dependency.
+上記はすべて通常の Java プロジェクトにも追加して使用できます。依存関係にサフィックス `-jvm` を付けるだけです。
 
-Here is a sample Maven configuration:
+Maven の設定例:
 
 ```xml
 <dependency>
@@ -48,25 +47,25 @@ Here is a sample Maven configuration:
 </dependency>
 ```
 
-### Connecting to Relays (Core)
+### リレーへの接続 (Core)
 
 ```kotlin
-// Create with private key (JVM/Native only)
+// 秘密鍵で作成 (JVM/Native のみ)
 val nostr = NostrFactory.instance(
     privateKeyHex = "your-private-key-hex",
     relays = listOf("wss://relay.damus.io", "wss://nos.lol"),
 )
 
-// Create read-only (no signing)
+// 読み取り専用 (署名なし)
 val nostr = NostrFactory.instance(
     relays = listOf("wss://relay.damus.io"),
 )
 
-// Connect to relays
+// リレーに接続
 nostr.relays().connect()
 ```
 
-### Querying Events (Core)
+### イベントの取得 (Core)
 
 ```kotlin
 val filter = NostrFilter(
@@ -80,46 +79,46 @@ response.data.forEach { event ->
 }
 ```
 
-### Posting a Note (Social)
+### ノートの投稿 (Social)
 
 ```kotlin
 val social = NostrSocialFactory.instance(nostr)
 
-// Post a text note
+// テキストノートを投稿
 social.feed().post("Hello Nostr!")
 
-// Reply to a note
+// ノートにリプライ
 social.feed().reply(
-    content = "This is a reply",
+    content = "これはリプライです",
     replyToEventId = "target-event-id",
 )
 
-// Like a note
+// ノートにいいね
 social.reactions().like(
     eventId = "target-event-id",
     authorPubkey = "target-author-pubkey",
 )
 ```
 
-### User Profile (Social)
+### ユーザープロフィール (Social)
 
 ```kotlin
 val social = NostrSocialFactory.instance(nostr)
 
-// Get user profile
+// プロフィールを取得
 val user = social.users().getProfile("pubkey-hex").data
 println("${user.name}: ${user.about}")
 
-// Get following list
+// フォローリストを取得
 val following = social.users().getFollowing("pubkey-hex").data
 ```
 
-### Real-time Timeline (Social)
+### リアルタイムタイムライン (Social)
 
 ```kotlin
 val stream = TimelineStream(nostr)
 stream.onNoteCallback = { note ->
-    println("New note: ${note.content}")
+    println("新しいノート: ${note.content}")
 }
 stream.start(followingPubkeys)
 ```
@@ -129,84 +128,84 @@ stream.start(followingPubkeys)
 ```kotlin
 val social = NostrSocialFactory.instance(nostr)
 
-// Create a zap request (kind:9734)
+// Zap リクエスト (kind:9734) を作成
 val zapRequest = social.zaps().createZapRequest(
     recipientPubkey = "target-pubkey-hex",
     amountMilliSats = 21000,
     relays = listOf("wss://relay.damus.io"),
-    message = "Great post!",
-    eventId = "target-event-id", // optional, null for profile zap
+    message = "素晴らしい投稿!",
+    eventId = "target-event-id", // 省略可、null でプロフィール Zap
 )
 
-// Get zap receipts for a user
+// ユーザーの Zap 受信を取得
 val zaps = social.zaps().getZapsForUser("pubkey-hex", limit = 10).data
 
-// Get LNURL pay info from Lightning address
+// Lightning アドレスから LNURL pay 情報を取得
 val payInfo = social.zaps().getLnurlPayInfo("user@getalby.com").data
 ```
 
-### Media Upload (Social)
+### メディアアップロード (Social)
 
 ```kotlin
 val social = NostrSocialFactory.instance(nostr)
 
-// Get NIP-96 server upload endpoint
+// NIP-96 サーバーのアップロード URL を取得
 val uploadUrl = social.media().getServerInfo("https://nostr.build").data
 
-// Upload a file
+// ファイルをアップロード
 val media = social.media().upload(
     serverUrl = "https://nostr.build",
     fileData = imageBytes,
     fileName = "photo.jpg",
     mimeType = "image/jpeg",
-    description = "A photo",
+    description = "写真",
 ).data
-println("Uploaded: ${media.url}")
+println("アップロード完了: ${media.url}")
 ```
 
-### NIP Utilities (Core)
+### NIP ユーティリティ (Core)
 
 ```kotlin
-// NIP-19: Bech32 encoding
+// NIP-19: Bech32 エンコーディング
 val npub = nostr.nip().encodeNpub("pubkey-hex")
 val entity = nostr.nip().decodeNip19("npub1...")
 
-// NIP-05: DNS identity verification
+// NIP-05: DNS ベースの ID 検証
 val result = nostr.nip().resolveNip05("user@example.com")
 ```
 
-## Supported NIPs
+## 対応 NIP
 
-| NIP | Description | Status |
-|-----|-------------|--------|
-| NIP-01 | Basic protocol | Implemented |
-| NIP-05 | DNS identity verification | Implemented |
-| NIP-10 | Reply threading (e-tag markers) | Implemented |
-| NIP-19 | Bech32 encoding (npub, nsec, note) | Implemented |
-| NIP-25 | Reactions | Implemented |
-| NIP-50 | Search | Implemented |
-| NIP-57 | Lightning Zaps | Implemented |
-| NIP-96 | File upload | Implemented |
-| NIP-98 | HTTP Auth (for NIP-96) | Implemented |
+| NIP | 説明 | 状態 |
+|-----|------|------|
+| NIP-01 | 基本プロトコル | 実装済み |
+| NIP-05 | DNS ベースの ID 検証 | 実装済み |
+| NIP-10 | リプライスレッド (e-tag マーカー) | 実装済み |
+| NIP-19 | Bech32 エンコーディング (npub, nsec, note) | 実装済み |
+| NIP-25 | リアクション | 実装済み |
+| NIP-50 | 検索 | 実装済み |
+| NIP-57 | Lightning Zaps | 実装済み |
+| NIP-96 | ファイルアップロード | 実装済み |
+| NIP-98 | HTTP 認証 (NIP-96 用) | 実装済み |
 
-## Platform Support
+## プラットフォームサポート
 
-| Platform | Core | Social | Signing |
-|----------|------|--------|---------|
+| プラットフォーム | Core | Social | 署名 |
+|-----------------|------|--------|------|
 | JVM | Yes | Yes | Yes |
 | iOS/macOS | Yes | Yes | Yes |
 | Linux x64 | Yes | - | Yes |
 | JS (Node/Browser) | Yes | Yes | No |
 | Windows (mingwX64) | Yes | Yes | No |
 
-> Signing (Schnorr/BIP-340) currently requires `secp256k1-kmp` which is only available on JVM, Apple, and Linux.
-> On JS and Windows, use `NostrConfig` with a custom `NostrSigner` implementation.
+> 署名 (Schnorr/BIP-340) は現在 `secp256k1-kmp` を使用しており、JVM, Apple, Linux でのみ利用可能です。
+> JS と Windows では、`NostrConfig` にカスタム `NostrSigner` 実装を設定して使用してください。
 
-## License
+## ライセンス
 
 MIT License
 
-## Author
+## 作者
 
 [Akihiro Urushihara](https://github.com/uakihir0)
 
