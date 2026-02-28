@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import work.socialhub.knostr.NostrConfig
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
 import kotlin.random.Random
@@ -34,8 +35,13 @@ class RelayPool {
     var onErrorCallback: ((String, Exception) -> Unit)? = null
 
     /** Add a relay connection */
-    fun addRelay(url: String): RelayConnection {
-        val connection = RelayConnection(url)
+    fun addRelay(url: String, config: NostrConfig? = null): RelayConnection {
+        val connection = RelayConnection(
+            url = url,
+            autoReconnect = config?.autoReconnect ?: false,
+            maxReconnectAttempts = config?.maxReconnectAttempts ?: 5,
+            reconnectDelayMs = config?.reconnectDelayMs ?: 1_000,
+        )
         connection.onEventCallback = { subId, event ->
             handleEvent(url, subId, event)
         }
@@ -64,6 +70,7 @@ class RelayPool {
     suspend fun connectAll(scope: CoroutineScope) {
         mutex.withLock {
             for (connection in connections.values) {
+                connection.setReconnectScope(scope)
                 if (!connection.isOpen) {
                     scope.launch { connection.open() }
                 }

@@ -1,5 +1,8 @@
 package work.socialhub.knostr.relay
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.internal.InternalUtility
@@ -11,10 +14,17 @@ import work.socialhub.khttpclient.websocket.WebsocketRequest
  */
 class RelayConnection(
     val url: String,
+    private val autoReconnect: Boolean = false,
+    private val maxReconnectAttempts: Int = 5,
+    private val reconnectDelayMs: Long = 1_000,
 ) {
     var client = WebsocketRequest()
     var isOpen: Boolean = false
         private set
+
+    private var reconnectAttempts = 0
+    private var reconnectScope: CoroutineScope? = null
+    private var intentionallyClosed = false
 
     // Callbacks
     var onEventCallback: ((String, NostrEvent) -> Unit)? = null
@@ -27,30 +37,23 @@ class RelayConnection(
     var onErrorCallback: ((Exception) -> Unit)? = null
 
     init {
-        client.url(url)
-        client.textListener = { text ->
-            onMessage(text)
-        }
-        client.onOpenListener = {
-            isOpen = true
-            onOpenCallback?.invoke()
-        }
-        client.onCloseListener = {
-            isOpen = false
-            onCloseCallback?.invoke()
-        }
-        client.onErrorListener = { e ->
-            onErrorCallback?.invoke(e)
-        }
+        setupClient()
+    }
+
+    /** Set the CoroutineScope used for reconnection */
+    fun setReconnectScope(scope: CoroutineScope) {
+        reconnectScope = scope
     }
 
     /** Open WebSocket connection (suspending) */
     suspend fun open() {
+        intentionallyClosed = false
         client.open()
     }
 
     /** Close WebSocket connection */
     fun close() {
+        intentionallyClosed = true
         client.close()
     }
 
@@ -78,6 +81,44 @@ class RelayConnection(
     suspend fun sendClose(subscriptionId: String) {
         val message = InternalUtility.buildCloseMessage(subscriptionId)
         client.sendText(message)
+    }
+
+    private fun setupClient() {
+        client.url(url)
+        client.textListener = { text ->
+            onMessage(text)
+        }
+        client.onOpenListener = {
+            isOpen = true
+            reconnectAttempts = 0
+            onOpenCallback?.invoke()
+        }
+        client.onCloseListener = {
+            isOpen = false
+            onCloseCallback?.invoke()
+            if (autoReconnect && !intentionallyClosed && reconnectAttempts < maxReconnectAttempts) {
+                attemptReconnect()
+            }
+        }
+        client.onErrorListener = { e ->
+            onErrorCallback?.invoke(e)
+        }
+    }
+
+    private fun attemptReconnect() {
+        val delayMs = (reconnectDelayMs * (1L shl reconnectAttempts.coerceAtMost(5)))
+            .coerceAtMost(30_000)
+        reconnectAttempts++
+        reconnectScope?.launch {
+            delay(delayMs)
+            try {
+                client = WebsocketRequest()
+                setupClient()
+                client.open()
+            } catch (e: Exception) {
+                onErrorCallback?.invoke(e)
+            }
+        }
     }
 
     private fun onMessage(text: String) {

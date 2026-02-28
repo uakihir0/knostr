@@ -16,4 +16,13 @@ class NostrConfig {
 
     /** Query timeout in milliseconds (waiting for EOSE) */
     var queryTimeoutMs: Long = 30_000
+
+    /** Whether to automatically reconnect on disconnect */
+    var autoReconnect: Boolean = true
+
+    /** Maximum number of reconnection attempts */
+    var maxReconnectAttempts: Int = 5
+
+    /** Initial reconnection delay in milliseconds (exponential backoff) */
+    var reconnectDelayMs: Long = 1_000
 }

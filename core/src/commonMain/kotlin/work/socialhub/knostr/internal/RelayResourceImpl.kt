@@ -15,7 +15,7 @@ class RelayResourceImpl(
         // Add relays from config if not already added
         for (url in config.relayUrls) {
             if (url !in relayPool.getConnectedRelays()) {
-                relayPool.addRelay(url)
+                relayPool.addRelay(url, config)
             }
         }
         coroutineScope {
