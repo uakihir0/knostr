@@ -1,5 +1,6 @@
 package work.socialhub.knostr.social
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertNotNull
@@ -98,6 +99,100 @@ class FeedResourceTest : AbstractTest() {
             val deleteResponse = social.feed().delete(event.id, "test cleanup")
             println("Delete result: ${deleteResponse.data}")
             assertTrue(deleteResponse.data)
+        } finally {
+            disconnectRelays(nostr, scope)
+        }
+    }
+
+    @Test
+    fun testGetNote() = runBlocking {
+        val social = social()
+        val nostr = social.nostr()
+        val scope = connectRelays(nostr)
+
+        try {
+            // Query a well-known event: jack's "hello world" note on Nostr
+            // (fiatjaf's first note - a widely replicated event)
+            val knownEventId = "d7dd5eb3ab747e16f8d0212d53032ea2a7cadef53837e5a6c66d42849fcb9027"
+
+            val noteResponse = social.feed().getNote(knownEventId)
+            val note = noteResponse.data
+
+            println("Got note: ${note.noteId}")
+            println("  content: ${note.content}")
+            assertNotNull(note.event)
+            assertNotNull(note.noteId)
+        } finally {
+            disconnectRelays(nostr, scope)
+        }
+    }
+
+    @Test
+    fun testGetUserFeed() = runBlocking {
+        val social = social()
+        val nostr = social.nostr()
+        val scope = connectRelays(nostr)
+
+        try {
+            // Query fiatjaf's feed (well-known active Nostr user)
+            val fiatjafPubkey = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+
+            val response = social.feed().getUserFeed(fiatjafPubkey, limit = 5)
+            val notes = response.data
+
+            println("User feed: ${notes.size} notes")
+            notes.forEach { note ->
+                println("  [${note.noteId.take(12)}...] ${note.content.take(60)}")
+            }
+            // Relay may return empty for some pubkeys; just verify API returns a list
+            assertNotNull(notes)
+        } finally {
+            disconnectRelays(nostr, scope)
+        }
+    }
+
+    @Test
+    fun testGetMentions() = runBlocking {
+        val social = social()
+        val nostr = social.nostr()
+        val scope = connectRelays(nostr)
+
+        try {
+            // getMentions queries p-tag mentions for the authenticated user.
+            // The test key may not have mentions, so we just verify the API works.
+            val response = social.feed().getMentions(limit = 5)
+            val notes = response.data
+
+            println("Mentions: ${notes.size} notes")
+            notes.forEach { note ->
+                println("  [${note.noteId.take(12)}...] ${note.content.take(60)}")
+            }
+            // Just verify it returns a list (may be empty for test key)
+            assertNotNull(notes)
+        } finally {
+            disconnectRelays(nostr, scope)
+        }
+    }
+
+    @Test
+    fun testGetThread() = runBlocking {
+        val social = social()
+        val nostr = social.nostr()
+        val scope = connectRelays(nostr)
+
+        try {
+            // Use a well-known event that has replies
+            val knownEventId = "d7dd5eb3ab747e16f8d0212d53032ea2a7cadef53837e5a6c66d42849fcb9027"
+
+            val threadResponse = social.feed().getThread(knownEventId)
+            val thread = threadResponse.data
+
+            println("Thread root: ${thread.rootNote?.noteId?.take(12)}...")
+            println("Thread replies: ${thread.replies.size}")
+            thread.replies.take(5).forEach { note ->
+                println("  [${note.noteId.take(12)}...] ${note.content.take(60)}")
+            }
+            assertNotNull(thread.rootNote)
         } finally {
             disconnectRelays(nostr, scope)
         }

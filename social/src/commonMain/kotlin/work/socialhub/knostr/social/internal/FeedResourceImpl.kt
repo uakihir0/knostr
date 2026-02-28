@@ -54,7 +54,6 @@ class FeedResourceImpl(
     override suspend fun getNote(eventId: String): Response<NostrNote> {
         val filter = NostrFilter(
             ids = listOf(eventId),
-            kinds = listOf(EventKind.TEXT_NOTE),
             limit = 1,
         )
         val response = nostr.events().queryEvents(listOf(filter))

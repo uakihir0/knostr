@@ -89,4 +89,49 @@ class UserResourceTest : AbstractTest() {
             disconnectRelays(nostr, scope)
         }
     }
+
+    @Test
+    fun testGetFollowers() = runBlocking {
+        val social = social()
+        val nostr = social.nostr()
+        val scope = connectRelays(nostr)
+
+        try {
+            // Query followers for jack (well-known Nostr user)
+            val response = social.users().getFollowers(
+                "82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2",
+                limit = 5,
+            )
+            val followers = response.data
+
+            println("Followers: ${followers.size}")
+            followers.forEach { pk ->
+                println("  $pk")
+            }
+        } finally {
+            disconnectRelays(nostr, scope)
+        }
+    }
+
+    @Test
+    fun testGetProfiles() = runBlocking {
+        val social = social()
+        val nostr = social.nostr()
+        val scope = connectRelays(nostr)
+
+        try {
+            // Use well-known Nostr pubkeys
+            val fiatjafPubkey = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+            val response = social.users().getProfiles(listOf(fiatjafPubkey))
+            val users = response.data
+
+            println("Profiles: ${users.size}")
+            users.forEach { user ->
+                println("  ${user.npub.take(20)}... name=${user.name}")
+            }
+            assertTrue(users.isNotEmpty(), "Should find profiles for well-known pubkeys")
+        } finally {
+            disconnectRelays(nostr, scope)
+        }
+    }
 }
