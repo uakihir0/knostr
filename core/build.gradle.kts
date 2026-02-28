@@ -70,43 +70,8 @@ kotlin {
             implementation(libs.coroutines.core)
             implementation(libs.serialization.json)
 
-            implementation(project.dependencies.platform(libs.cryptography.bom))
-            implementation(libs.cryptography.core)
+            implementation(project(":cipher"))
         }
-
-        // secp256k1-kmp supports JVM, Apple, and Linux (not JS or mingwX64).
-        // Use an intermediate "signingMain" source set for platforms that support it.
-        val signingMain by creating {
-            dependsOn(commonMain.get())
-            dependencies {
-                implementation(libs.secp256k1.kmp)
-            }
-        }
-        val signingTest by creating {
-            dependsOn(commonTest.get())
-        }
-
-        jvmMain { dependsOn(signingMain) }
-        jvmTest { dependsOn(signingTest) }
-
-        if (HostManager.hostIsMac) {
-            appleMain {
-                dependsOn(signingMain)
-                dependencies {
-                    implementation(libs.cryptography.openssl)
-                }
-            }
-        }
-
-        val linuxX64Main by getting { dependsOn(signingMain) }
-
-        // Unsupported targets get a stub signerFactory
-        val unsupportedSigningMain by creating {
-            dependsOn(commonMain.get())
-        }
-
-        jsMain { dependsOn(unsupportedSigningMain) }
-        val mingwX64Main by getting { dependsOn(unsupportedSigningMain) }
 
         // for test
         commonTest.dependencies {
@@ -115,8 +80,6 @@ kotlin {
         }
 
         jvmTest.dependencies {
-            implementation(libs.cryptography.jdk)
-            implementation(libs.secp256k1.kmp.jni.jvm)
             implementation(libs.slf4j.simple)
         }
     }

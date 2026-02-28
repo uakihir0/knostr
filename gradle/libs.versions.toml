@@ -15,14 +15,6 @@ serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-jso
 nexus-publish = "io.github.gradle-nexus.publish-plugin:io.github.gradle-nexus.publish-plugin.gradle.plugin:2.0.0"
 maven-publish = { module = "com.vanniktech:gradle-maven-publish-plugin", version.ref = "maven-publish" }
 dokka = { module = "org.jetbrains.dokka:dokka-gradle-plugin", version.ref = "dokka" }
-# secp256k1 (Schnorr signatures)
-secp256k1-kmp = "fr.acinq.secp256k1:secp256k1-kmp:0.16.0"
-secp256k1-kmp-jni-jvm = "fr.acinq.secp256k1:secp256k1-kmp-jni-jvm:0.16.0"
-# cryptography (SHA-256)
-cryptography-bom = "dev.whyoleg.cryptography:cryptography-bom:0.5.0"
-cryptography-core = { module = "dev.whyoleg.cryptography:cryptography-core" }
-cryptography-openssl = { module = "dev.whyoleg.cryptography:cryptography-provider-openssl3-prebuilt" }
-cryptography-jdk = { module = "dev.whyoleg.cryptography:cryptography-provider-jdk" }
 slf4j-simple = "org.slf4j:slf4j-simple:2.0.17"
 
 [plugins]

@@ -2,7 +2,8 @@ package work.socialhub.knostr.signing
 
 /**
  * Create a NostrSigner from a private key hex string.
- * Platform-specific: uses secp256k1-kmp on JVM/Native,
- * throws UnsupportedOperationException on JS.
+ * Uses the pure Kotlin secp256k1 cipher module (works on all platforms).
  */
-expect fun createSigner(privateKeyHex: String): NostrSigner
+fun createSigner(privateKeyHex: String): NostrSigner {
+    return Secp256k1Signer(privateKeyHex)
+}

@@ -1,6 +1,6 @@
 package work.socialhub.knostr.signing
 
-import fr.acinq.secp256k1.Secp256k1
+import work.socialhub.knostr.cipher.Secp256k1
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.internal.InternalUtility
