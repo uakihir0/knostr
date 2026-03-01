@@ -195,6 +195,88 @@ class MessageResourceImpl(
         return bytes
     }
 
+    // --- NIP-04 Legacy DM ---
+
+    override suspend fun sendLegacyMessage(recipientPubkey: String, content: String): Response<NostrEvent> {
+        val signer = nostr.signer()
+            ?: throw NostrException("Signer is required to send DM")
+
+        val myPubkey = signer.getPublicKey()
+        val now = Clock.System.now().epochSeconds
+
+        val encrypted = signer.nip04Encrypt(content, recipientPubkey)
+
+        val unsigned = UnsignedEvent(
+            pubkey = myPubkey,
+            createdAt = now,
+            kind = EventKind.ENCRYPTED_DM,
+            tags = listOf(listOf("p", recipientPubkey)),
+            content = encrypted,
+        )
+        val event = signer.sign(unsigned)
+        nostr.events().publishEvent(event)
+
+        return Response(event)
+    }
+
+    override suspend fun getLegacyMessages(since: Long?, until: Long?, limit: Int): Response<List<NostrDirectMessage>> {
+        val signer = nostr.signer()
+            ?: throw NostrException("Signer is required to get DMs")
+
+        val myPubkey = signer.getPublicKey()
+
+        // Query kind:4 events addressed to us and sent by us
+        val receivedFilter = NostrFilter(
+            kinds = listOf(EventKind.ENCRYPTED_DM),
+            pTags = listOf(myPubkey),
+            since = since,
+            until = until,
+            limit = limit,
+        )
+        val sentFilter = NostrFilter(
+            kinds = listOf(EventKind.ENCRYPTED_DM),
+            authors = listOf(myPubkey),
+            since = since,
+            until = until,
+            limit = limit,
+        )
+
+        val response = nostr.events().queryEvents(listOf(receivedFilter, sentFilter))
+        val messages = response.data.mapNotNull { event ->
+            decryptLegacyDm(event, signer, myPubkey)
+        }.sortedByDescending { it.createdAt }
+
+        return Response(messages)
+    }
+
+    // --- Internal NIP-04 helpers ---
+
+    private fun decryptLegacyDm(event: NostrEvent, signer: NostrSigner, myPubkey: String): NostrDirectMessage? {
+        return try {
+            if (event.kind != EventKind.ENCRYPTED_DM) return null
+
+            val recipientPubkey = event.tags
+                .firstOrNull { it.size >= 2 && it[0] == "p" }
+                ?.get(1) ?: return null
+
+            // Determine the other party's pubkey for decryption
+            val otherPubkey = if (event.pubkey == myPubkey) recipientPubkey else event.pubkey
+            val decrypted = signer.nip04Decrypt(event.content, otherPubkey)
+
+            NostrDirectMessage(
+                id = event.id,
+                senderPubkey = event.pubkey,
+                recipientPubkey = recipientPubkey,
+                content = decrypted,
+                createdAt = event.createdAt,
+                event = event,
+                isLegacy = true,
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     // --- Blocking variants ---
 
     override fun sendMessageBlocking(recipientPubkey: String, content: String): Response<NostrEvent> {
@@ -207,6 +289,14 @@ class MessageResourceImpl(
 
     override fun getConversationBlocking(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrDirectMessage>> {
         return toBlocking { getConversation(pubkey, since, until, limit) }
+    }
+
+    override fun sendLegacyMessageBlocking(recipientPubkey: String, content: String): Response<NostrEvent> {
+        return toBlocking { sendLegacyMessage(recipientPubkey, content) }
+    }
+
+    override fun getLegacyMessagesBlocking(since: Long?, until: Long?, limit: Int): Response<List<NostrDirectMessage>> {
+        return toBlocking { getLegacyMessages(since, until, limit) }
     }
 }
 

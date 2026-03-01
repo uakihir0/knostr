@@ -17,6 +17,12 @@ interface MessageResource {
     /** NIP-17: Get conversation with a specific user */
     suspend fun getConversation(pubkey: String, since: Long? = null, until: Long? = null, limit: Int = 50): Response<List<NostrDirectMessage>>
 
+    /** NIP-04 (legacy): Send an encrypted DM */
+    suspend fun sendLegacyMessage(recipientPubkey: String, content: String): Response<NostrEvent>
+
+    /** NIP-04 (legacy): Get received legacy DMs */
+    suspend fun getLegacyMessages(since: Long? = null, until: Long? = null, limit: Int = 50): Response<List<NostrDirectMessage>>
+
     @JsExport.Ignore
     fun sendMessageBlocking(recipientPubkey: String, content: String): Response<NostrEvent>
 
@@ -25,4 +31,10 @@ interface MessageResource {
 
     @JsExport.Ignore
     fun getConversationBlocking(pubkey: String, since: Long? = null, until: Long? = null, limit: Int = 50): Response<List<NostrDirectMessage>>
+
+    @JsExport.Ignore
+    fun sendLegacyMessageBlocking(recipientPubkey: String, content: String): Response<NostrEvent>
+
+    @JsExport.Ignore
+    fun getLegacyMessagesBlocking(since: Long? = null, until: Long? = null, limit: Int = 50): Response<List<NostrDirectMessage>>
 }

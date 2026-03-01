@@ -22,4 +22,10 @@ interface NostrSigner {
 
     /** Decrypt a NIP-44 v2 payload from the given sender */
     fun nip44Decrypt(payload: String, senderPubkey: String): String
+
+    /** Encrypt plaintext using NIP-04 (legacy) for the given recipient */
+    fun nip04Encrypt(plaintext: String, recipientPubkey: String): String
+
+    /** Decrypt a NIP-04 (legacy) payload from the given sender */
+    fun nip04Decrypt(ciphertext: String, senderPubkey: String): String
 }

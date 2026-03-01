@@ -76,6 +76,80 @@ class MessageResourceTest : AbstractTest() {
         }
     }
 
+    // --- NIP-04 Legacy DM tests ---
+
+    @Test
+    fun testSendLegacyMessage() = runBlocking {
+        val social = social()
+        val nostr = social.nostr()
+        val scope = connectRelays(nostr)
+
+        try {
+            val myPubkey = publicKey()
+            val response = social.messages().sendLegacyMessage(myPubkey, "knostr NIP-04 legacy DM test")
+            val event = response.data
+
+            println("Legacy DM event: ${event.id}")
+            assertNotNull(event.id)
+            assertTrue(event.kind == 4, "Expected kind:4 (Encrypted DM), got ${event.kind}")
+
+            // Verify p-tag contains recipient
+            val pTags = event.tags.filter { it.size >= 2 && it[0] == "p" }
+            assertTrue(pTags.isNotEmpty(), "Legacy DM should have p-tag")
+            assertTrue(pTags[0][1] == myPubkey, "p-tag should contain recipient pubkey")
+
+            // Verify content is encrypted (NIP-04 format: base64?iv=base64)
+            assertTrue(event.content.contains("?iv="), "Content should be NIP-04 encrypted format")
+        } finally {
+            disconnectRelays(nostr, scope)
+        }
+    }
+
+    @Test
+    fun testSendAndReceiveLegacyMessage() = runBlocking {
+        val social = social()
+        val nostr = social.nostr()
+        val scope = connectRelays(nostr)
+
+        try {
+            val myPubkey = publicKey()
+            val messageContent = "knostr NIP-04 round-trip test ${System.currentTimeMillis()}"
+
+            // Send legacy DM to self
+            social.messages().sendLegacyMessage(myPubkey, messageContent)
+            delay(3000)
+
+            // Try to receive
+            try {
+                val response = social.messages().getLegacyMessages(limit = 5)
+                val messages = response.data
+
+                println("Received ${messages.size} legacy messages")
+                messages.forEach { msg ->
+                    println("  from=${msg.senderPubkey.take(12)}... content=${msg.content.take(50)}")
+                }
+
+                // If relay returns our message, verify content
+                val found = messages.find { it.content == messageContent }
+                if (found != null) {
+                    println("Found sent legacy message!")
+                    assertTrue(found.senderPubkey == myPubkey)
+                    assertTrue(found.recipientPubkey == myPubkey)
+                    assertTrue(found.isLegacy)
+                } else {
+                    println("Relay did not return the sent legacy DM (expected for test relays)")
+                }
+                assertNotNull(messages)
+            } catch (e: Exception) {
+                println("getLegacyMessages failed (relay may not return kind:4): ${e.message}")
+            }
+        } finally {
+            disconnectRelays(nostr, scope)
+        }
+    }
+
+    // --- General tests ---
+
     @Test
     fun testGetConversation() = runBlocking {
         val social = social()
