@@ -23,6 +23,9 @@ interface ReactionResource {
     /** Remove a reaction (find own kind:7 with matching content, then delete) */
     suspend fun unreact(eventId: String, content: String? = null): Response<Boolean>
 
+    /** React with custom emoji (NIP-30, kind:7 with emoji tag) */
+    suspend fun reactWithEmoji(eventId: String, authorPubkey: String, shortcode: String, emojiUrl: String): Response<NostrEvent>
+
     /** Get reactions made by a specific user */
     suspend fun getUserReactions(pubkey: String, since: Long? = null, until: Long? = null, limit: Int = 50): Response<List<NostrReaction>>
 
@@ -40,6 +43,9 @@ interface ReactionResource {
 
     @JsExport.Ignore
     fun unreactBlocking(eventId: String, content: String? = null): Response<Boolean>
+
+    @JsExport.Ignore
+    fun reactWithEmojiBlocking(eventId: String, authorPubkey: String, shortcode: String, emojiUrl: String): Response<NostrEvent>
 
     @JsExport.Ignore
     fun getUserReactionsBlocking(pubkey: String, since: Long? = null, until: Long? = null, limit: Int = 50): Response<List<NostrReaction>>

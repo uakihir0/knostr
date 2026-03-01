@@ -57,6 +57,26 @@ class ReactionResourceImpl(
         return deleteOwnReaction(eventId, content)
     }
 
+    override suspend fun reactWithEmoji(eventId: String, authorPubkey: String, shortcode: String, emojiUrl: String): Response<NostrEvent> {
+        val signer = nostr.signer()
+            ?: throw NostrException("Signer is required to react")
+
+        val unsigned = UnsignedEvent(
+            pubkey = signer.getPublicKey(),
+            createdAt = Clock.System.now().epochSeconds,
+            kind = EventKind.REACTION,
+            tags = listOf(
+                listOf("e", eventId),
+                listOf("p", authorPubkey),
+                listOf("emoji", shortcode, emojiUrl),
+            ),
+            content = ":$shortcode:",
+        )
+        val signed = signer.sign(unsigned)
+        nostr.events().publishEvent(signed)
+        return Response(signed)
+    }
+
     override suspend fun getUserReactions(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrReaction>> {
         val filter = NostrFilter(
             authors = listOf(pubkey),
@@ -113,6 +133,10 @@ class ReactionResourceImpl(
 
     override fun unreactBlocking(eventId: String, content: String?): Response<Boolean> {
         return toBlocking { unreact(eventId, content) }
+    }
+
+    override fun reactWithEmojiBlocking(eventId: String, authorPubkey: String, shortcode: String, emojiUrl: String): Response<NostrEvent> {
+        return toBlocking { reactWithEmoji(eventId, authorPubkey, shortcode, emojiUrl) }
     }
 
     override fun getUserReactionsBlocking(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrReaction>> {

@@ -89,6 +89,14 @@ object SocialMapper {
                     targetEventId = tag[1]
                 }
             }
+
+            // NIP-30: custom emoji URL
+            val shortcode = content.removePrefix(":").removeSuffix(":")
+            if (content.startsWith(":") && content.endsWith(":") && shortcode.isNotEmpty()) {
+                emojiUrl = event.tags
+                    .firstOrNull { it.size >= 3 && it[0] == "emoji" && it[1] == shortcode }
+                    ?.get(2)
+            }
         }
     }
 

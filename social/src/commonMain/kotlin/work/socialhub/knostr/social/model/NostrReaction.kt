@@ -11,4 +11,6 @@ class NostrReaction {
     /** Reaction content: "+" (like), "-" (dislike), or emoji */
     var content: String = "+"
     var createdAt: Long = 0
+    /** NIP-30: custom emoji URL (null for standard reactions) */
+    var emojiUrl: String? = null
 }
