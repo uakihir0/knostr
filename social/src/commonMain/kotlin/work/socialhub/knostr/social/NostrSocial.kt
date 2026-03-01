@@ -10,6 +10,7 @@ import work.socialhub.knostr.social.api.SearchResource
 import work.socialhub.knostr.social.api.UserResource
 import work.socialhub.knostr.social.api.ArticleResource
 import work.socialhub.knostr.social.api.BookmarkResource
+import work.socialhub.knostr.social.api.ChannelResource
 import work.socialhub.knostr.social.api.InterestResource
 import work.socialhub.knostr.social.api.ListResource
 import work.socialhub.knostr.social.api.PinResource
@@ -35,5 +36,6 @@ interface NostrSocial {
     fun polls(): PollResource
     fun articles(): ArticleResource
     fun lists(): ListResource
+    fun channels(): ChannelResource
     fun nostr(): Nostr
 }
