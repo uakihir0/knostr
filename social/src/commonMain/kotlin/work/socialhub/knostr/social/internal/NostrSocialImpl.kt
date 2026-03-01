@@ -9,6 +9,7 @@ import work.socialhub.knostr.social.api.MuteResource
 import work.socialhub.knostr.social.api.ReactionResource
 import work.socialhub.knostr.social.api.SearchResource
 import work.socialhub.knostr.social.api.UserResource
+import work.socialhub.knostr.social.api.RelayListResource
 import work.socialhub.knostr.social.api.ZapResource
 
 class NostrSocialImpl(
@@ -23,6 +24,7 @@ class NostrSocialImpl(
     private val zaps: ZapResource = ZapResourceImpl(nostr)
     private val mutes: MuteResource = MuteResourceImpl(nostr)
     private val messages: MessageResource = MessageResourceImpl(nostr)
+    private val relayList: RelayListResource = RelayListResourceImpl(nostr)
 
     override fun feed() = feed
     override fun users() = users
@@ -32,5 +34,6 @@ class NostrSocialImpl(
     override fun zaps() = zaps
     override fun mutes() = mutes
     override fun messages() = messages
+    override fun relayList() = relayList
     override fun nostr() = nostr
 }
