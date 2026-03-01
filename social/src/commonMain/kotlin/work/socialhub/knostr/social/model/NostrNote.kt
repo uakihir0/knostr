@@ -18,4 +18,6 @@ class NostrNote {
     var replyCount: Int = 0
     /** NIP-19 note bech32 ID */
     var noteId: String = ""
+    /** NIP-36 content warning reason (null if no warning) */
+    var contentWarning: String? = null
 }

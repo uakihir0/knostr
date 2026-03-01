@@ -25,10 +25,10 @@ interface FeedResource {
     suspend fun getThread(eventId: String): Response<NostrThread>
 
     /** Post a new text note (kind:1) */
-    suspend fun post(content: String, tags: List<List<String>> = listOf()): Response<NostrEvent>
+    suspend fun post(content: String, tags: List<List<String>> = listOf(), contentWarning: String? = null): Response<NostrEvent>
 
     /** Reply to a note (NIP-10 threading) */
-    suspend fun reply(content: String, replyToEventId: String, rootEventId: String? = null): Response<NostrEvent>
+    suspend fun reply(content: String, replyToEventId: String, rootEventId: String? = null, contentWarning: String? = null): Response<NostrEvent>
 
     /** Repost a note (kind:6) */
     suspend fun repost(eventId: String): Response<NostrEvent>
@@ -52,10 +52,10 @@ interface FeedResource {
     fun getThreadBlocking(eventId: String): Response<NostrThread>
 
     @JsExport.Ignore
-    fun postBlocking(content: String, tags: List<List<String>> = listOf()): Response<NostrEvent>
+    fun postBlocking(content: String, tags: List<List<String>> = listOf(), contentWarning: String? = null): Response<NostrEvent>
 
     @JsExport.Ignore
-    fun replyBlocking(content: String, replyToEventId: String, rootEventId: String? = null): Response<NostrEvent>
+    fun replyBlocking(content: String, replyToEventId: String, rootEventId: String? = null, contentWarning: String? = null): Response<NostrEvent>
 
     @JsExport.Ignore
     fun repostBlocking(eventId: String): Response<NostrEvent>

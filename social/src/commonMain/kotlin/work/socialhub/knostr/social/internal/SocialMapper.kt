@@ -46,6 +46,11 @@ object SocialMapper {
             createdAt = event.createdAt
             noteId = Bech32.encode("note", Hex.decode(event.id))
 
+            // NIP-36: content warning
+            contentWarning = event.tags
+                .firstOrNull { it.size >= 2 && it[0] == "content-warning" }
+                ?.get(1)
+
             // Parse NIP-10 reply threading from e-tags
             for (tag in event.tags) {
                 if (tag.size >= 2 && tag[0] == "e") {

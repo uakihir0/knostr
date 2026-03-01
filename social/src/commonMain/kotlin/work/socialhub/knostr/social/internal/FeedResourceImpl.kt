@@ -158,15 +158,20 @@ class FeedResourceImpl(
         return if (eTags.size == 1) eTags[0][1] else eTags.last()[1]
     }
 
-    override suspend fun post(content: String, tags: List<List<String>>): Response<NostrEvent> {
+    override suspend fun post(content: String, tags: List<List<String>>, contentWarning: String?): Response<NostrEvent> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to post")
+
+        val allTags = tags.toMutableList()
+        if (contentWarning != null) {
+            allTags.add(listOf("content-warning", contentWarning))
+        }
 
         val unsigned = UnsignedEvent(
             pubkey = signer.getPublicKey(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.TEXT_NOTE,
-            tags = tags,
+            tags = allTags,
             content = content,
         )
         val signed = signer.sign(unsigned)
@@ -174,7 +179,7 @@ class FeedResourceImpl(
         return Response(signed)
     }
 
-    override suspend fun reply(content: String, replyToEventId: String, rootEventId: String?): Response<NostrEvent> {
+    override suspend fun reply(content: String, replyToEventId: String, rootEventId: String?, contentWarning: String?): Response<NostrEvent> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to reply")
 
@@ -184,6 +189,9 @@ class FeedResourceImpl(
         tags.add(listOf("e", effectiveRootId, "", "root"))
         if (effectiveRootId != replyToEventId) {
             tags.add(listOf("e", replyToEventId, "", "reply"))
+        }
+        if (contentWarning != null) {
+            tags.add(listOf("content-warning", contentWarning))
         }
 
         val unsigned = UnsignedEvent(
@@ -238,12 +246,12 @@ class FeedResourceImpl(
         return toBlocking { getThread(eventId) }
     }
 
-    override fun postBlocking(content: String, tags: List<List<String>>): Response<NostrEvent> {
-        return toBlocking { post(content, tags) }
+    override fun postBlocking(content: String, tags: List<List<String>>, contentWarning: String?): Response<NostrEvent> {
+        return toBlocking { post(content, tags, contentWarning) }
     }
 
-    override fun replyBlocking(content: String, replyToEventId: String, rootEventId: String?): Response<NostrEvent> {
-        return toBlocking { reply(content, replyToEventId, rootEventId) }
+    override fun replyBlocking(content: String, replyToEventId: String, rootEventId: String?, contentWarning: String?): Response<NostrEvent> {
+        return toBlocking { reply(content, replyToEventId, rootEventId, contentWarning) }
     }
 
     override fun repostBlocking(eventId: String): Response<NostrEvent> {
