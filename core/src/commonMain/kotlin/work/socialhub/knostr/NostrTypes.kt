@@ -38,6 +38,8 @@ object EventKind {
     const val PEOPLE_LIST = 30000
     const val BADGE_DEFINITION = 30009
     const val PROFILE_BADGES = 30008
+    const val NIP46_REQUEST = 24133
+    const val NIP46_RESPONSE = 24134
     const val APP_SPECIFIC_DATA = 30078
     const val USER_STATUS = 30315
 }
