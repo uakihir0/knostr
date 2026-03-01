@@ -10,6 +10,7 @@ import work.socialhub.knostr.social.api.ReactionResource
 import work.socialhub.knostr.social.api.SearchResource
 import work.socialhub.knostr.social.api.UserResource
 import work.socialhub.knostr.social.api.BookmarkResource
+import work.socialhub.knostr.social.api.PinResource
 import work.socialhub.knostr.social.api.RelayListResource
 import work.socialhub.knostr.social.api.ZapResource
 
@@ -27,6 +28,7 @@ class NostrSocialImpl(
     private val messages: MessageResource = MessageResourceImpl(nostr)
     private val relayList: RelayListResource = RelayListResourceImpl(nostr)
     private val bookmarks: BookmarkResource = BookmarkResourceImpl(nostr)
+    private val pins: PinResource = PinResourceImpl(nostr)
 
     override fun feed() = feed
     override fun users() = users
@@ -38,5 +40,6 @@ class NostrSocialImpl(
     override fun messages() = messages
     override fun relayList() = relayList
     override fun bookmarks() = bookmarks
+    override fun pins() = pins
     override fun nostr() = nostr
 }
