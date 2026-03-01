@@ -11,6 +11,7 @@ import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.internal.InternalUtility
 import work.socialhub.knostr.social.api.UserResource
 import work.socialhub.knostr.social.model.NostrUser
+import work.socialhub.knostr.social.model.NostrUserStatus
 import work.socialhub.knostr.util.Bech32
 import work.socialhub.knostr.util.Hex
 import work.socialhub.knostr.util.toBlocking
@@ -158,6 +159,59 @@ class UserResourceImpl(
         }
     }
 
+    override suspend fun setStatus(content: String, type: String, url: String?, expiration: Long?): Response<NostrEvent> {
+        val signer = nostr.signer()
+            ?: throw NostrException("Signer is required to set status")
+
+        val tags = mutableListOf<List<String>>()
+        tags.add(listOf("d", type))
+        if (url != null) {
+            tags.add(listOf("r", url))
+        }
+        if (expiration != null) {
+            tags.add(listOf("expiration", expiration.toString()))
+        }
+
+        val unsigned = UnsignedEvent(
+            pubkey = signer.getPublicKey(),
+            createdAt = Clock.System.now().epochSeconds,
+            kind = EventKind.USER_STATUS,
+            tags = tags,
+            content = content,
+        )
+        val signed = signer.sign(unsigned)
+        nostr.events().publishEvent(signed)
+        return Response(signed)
+    }
+
+    override suspend fun getStatus(pubkey: String, type: String): Response<NostrUserStatus?> {
+        val filter = NostrFilter(
+            authors = listOf(pubkey),
+            kinds = listOf(EventKind.USER_STATUS),
+            dTags = listOf(type),
+            limit = 1,
+        )
+        val response = nostr.events().queryEvents(listOf(filter))
+        val event = response.data.firstOrNull()
+        if (event == null) {
+            return Response(null)
+        }
+
+        val statusUrl = event.tags.firstOrNull { it.size >= 2 && it[0] == "r" }?.get(1)
+        val expiration = event.tags.firstOrNull { it.size >= 2 && it[0] == "expiration" }?.get(1)?.toLongOrNull()
+
+        return Response(NostrUserStatus(
+            type = type,
+            content = event.content,
+            url = statusUrl,
+            expiration = expiration,
+        ))
+    }
+
+    override suspend fun clearStatus(type: String): Response<NostrEvent> {
+        return setStatus("", type)
+    }
+
     private suspend fun getFollowingTags(pubkey: String): List<List<String>> {
         val filter = NostrFilter(
             authors = listOf(pubkey),
@@ -198,5 +252,17 @@ class UserResourceImpl(
 
     override fun verifyNip05Blocking(address: String): Response<Boolean> {
         return toBlocking { verifyNip05(address) }
+    }
+
+    override fun setStatusBlocking(content: String, type: String, url: String?, expiration: Long?): Response<NostrEvent> {
+        return toBlocking { setStatus(content, type, url, expiration) }
+    }
+
+    override fun getStatusBlocking(pubkey: String, type: String): Response<NostrUserStatus?> {
+        return toBlocking { getStatus(pubkey, type) }
+    }
+
+    override fun clearStatusBlocking(type: String): Response<NostrEvent> {
+        return toBlocking { clearStatus(type) }
     }
 }

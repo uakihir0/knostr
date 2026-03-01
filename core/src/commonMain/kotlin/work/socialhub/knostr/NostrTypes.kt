@@ -27,4 +27,5 @@ object EventKind {
     const val DM_RELAY_LIST = 10050
     const val BOOKMARK_LIST = 10003
     const val INTEREST_LIST = 10015
+    const val USER_STATUS = 30315
 }
