@@ -3,7 +3,7 @@ package work.socialhub.knostr.cipher
 /**
  * Pure Kotlin HKDF implementation (RFC 5869) using HMAC-SHA256.
  */
-internal object Hkdf {
+object Hkdf {
 
     private const val HASH_LEN = 32 // SHA-256 output length
 

@@ -3,7 +3,7 @@ package work.socialhub.knostr.cipher
 /**
  * Pure Kotlin ChaCha20 stream cipher implementation (RFC 8439).
  */
-internal object ChaCha20 {
+object ChaCha20 {
 
     /**
      * Encrypt/decrypt data using ChaCha20 (XOR with keystream).

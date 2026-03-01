@@ -4,7 +4,7 @@ package work.socialhub.knostr.cipher
  * Pure Kotlin HMAC-SHA256 implementation (RFC 2104).
  * Uses the existing [Sha256] implementation.
  */
-internal object HmacSha256 {
+object HmacSha256 {
 
     private const val BLOCK_SIZE = 64
 
