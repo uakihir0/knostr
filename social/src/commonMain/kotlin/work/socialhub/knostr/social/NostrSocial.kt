@@ -3,6 +3,7 @@ package work.socialhub.knostr.social
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.social.api.FeedResource
 import work.socialhub.knostr.social.api.MediaResource
+import work.socialhub.knostr.social.api.MessageResource
 import work.socialhub.knostr.social.api.MuteResource
 import work.socialhub.knostr.social.api.ReactionResource
 import work.socialhub.knostr.social.api.SearchResource
@@ -19,5 +20,6 @@ interface NostrSocial {
     fun media(): MediaResource
     fun zaps(): ZapResource
     fun mutes(): MuteResource
+    fun messages(): MessageResource
     fun nostr(): Nostr
 }
