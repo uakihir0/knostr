@@ -207,4 +207,34 @@ class Secp256k1Test {
         val sig = Secp256k1.signSchnorr(msg, privKey, auxRand)
         assertTrue(Secp256k1.verifySchnorr(sig, msg, pubKey))
     }
+
+    // --- ECDH shared secret tests ---
+
+    @Test
+    fun testComputeSharedSecret() {
+        // ECDH: alice_priv * bob_pub == bob_priv * alice_pub
+        val alicePriv = hexToBytes("67dea2ed018072d675f5415ecfaed7d2597555e202d85b3d65ea4e58d2d92ffa")
+        val bobPriv = hexToBytes("b7e151628aed2a6abf7158809cf4f3c762e7160f38b4da56a784d9045190cfef")
+
+        val alicePub = Secp256k1.pubkeyCreate(alicePriv).drop(1).toByteArray()
+        val bobPub = Secp256k1.pubkeyCreate(bobPriv).drop(1).toByteArray()
+
+        val sharedAlice = Secp256k1.computeSharedSecret(alicePriv, bobPub)
+        val sharedBob = Secp256k1.computeSharedSecret(bobPriv, alicePub)
+
+        assertEquals(32, sharedAlice.size)
+        assertEquals(32, sharedBob.size)
+        assertEquals(bytesToHex(sharedAlice), bytesToHex(sharedBob))
+    }
+
+    @Test
+    fun testComputeSharedSecretDeterministic() {
+        val privKey = hexToBytes("0000000000000000000000000000000000000000000000000000000000000003")
+        val pubKey = hexToBytes("f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9")
+
+        val shared1 = Secp256k1.computeSharedSecret(privKey, pubKey)
+        val shared2 = Secp256k1.computeSharedSecret(privKey, pubKey)
+
+        assertEquals(bytesToHex(shared1), bytesToHex(shared2))
+    }
 }

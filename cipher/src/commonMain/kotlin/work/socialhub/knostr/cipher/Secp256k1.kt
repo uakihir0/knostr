@@ -91,6 +91,28 @@ object Secp256k1 {
      * @param publicKey 32-byte x-only public key
      * @return true if signature is valid
      */
+    /**
+     * Compute ECDH shared secret (x-coordinate only) from a private key and x-only public key.
+     * @param privateKey 32-byte private key
+     * @param publicKey 32-byte x-only public key
+     * @return 32-byte shared secret (x-coordinate of the shared point)
+     */
+    fun computeSharedSecret(privateKey: ByteArray, publicKey: ByteArray): ByteArray {
+        require(privateKey.size == 32) { "Private key must be 32 bytes" }
+        require(publicKey.size == 32) { "Public key must be 32 bytes (x-only)" }
+
+        val d = UInt256.fromByteArray(privateKey)
+        require(!d.isZero() && d < n) { "Private key out of range" }
+
+        val pubPoint = ECMath.liftX(UInt256.fromByteArray(publicKey))
+            ?: throw IllegalArgumentException("Invalid public key: not on curve")
+
+        val result = ECMath.multiply(d, pubPoint)
+        require(result is ECPoint.Affine) { "ECDH resulted in point at infinity" }
+
+        return result.x.toByteArray()
+    }
+
     fun verifySchnorr(signature: ByteArray, message: ByteArray, publicKey: ByteArray): Boolean {
         if (signature.size != 64 || message.size != 32 || publicKey.size != 32) return false
 
