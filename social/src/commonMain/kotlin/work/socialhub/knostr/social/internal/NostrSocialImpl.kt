@@ -10,6 +10,7 @@ import work.socialhub.knostr.social.api.ReactionResource
 import work.socialhub.knostr.social.api.SearchResource
 import work.socialhub.knostr.social.api.UserResource
 import work.socialhub.knostr.social.api.ArticleResource
+import work.socialhub.knostr.social.api.BadgeResource
 import work.socialhub.knostr.social.api.BookmarkResource
 import work.socialhub.knostr.social.api.ChannelResource
 import work.socialhub.knostr.social.api.InterestResource
@@ -39,6 +40,7 @@ class NostrSocialImpl(
     private val articles: ArticleResource = ArticleResourceImpl(nostr)
     private val lists: ListResource = ListResourceImpl(nostr)
     private val channels: ChannelResource = ChannelResourceImpl(nostr)
+    private val badges: BadgeResource = BadgeResourceImpl(nostr)
 
     override fun feed() = feed
     override fun users() = users
@@ -56,5 +58,6 @@ class NostrSocialImpl(
     override fun articles() = articles
     override fun lists() = lists
     override fun channels() = channels
+    override fun badges() = badges
     override fun nostr() = nostr
 }
