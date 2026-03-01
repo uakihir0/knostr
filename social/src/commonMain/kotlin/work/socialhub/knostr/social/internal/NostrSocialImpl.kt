@@ -18,6 +18,7 @@ import work.socialhub.knostr.social.api.ListResource
 import work.socialhub.knostr.social.api.PinResource
 import work.socialhub.knostr.social.api.PollResource
 import work.socialhub.knostr.social.api.RelayListResource
+import work.socialhub.knostr.social.api.WalletResource
 import work.socialhub.knostr.social.api.ZapResource
 
 class NostrSocialImpl(
@@ -41,6 +42,7 @@ class NostrSocialImpl(
     private val lists: ListResource = ListResourceImpl(nostr)
     private val channels: ChannelResource = ChannelResourceImpl(nostr)
     private val badges: BadgeResource = BadgeResourceImpl(nostr)
+    private val wallet: WalletResource = WalletResourceImpl()
 
     override fun feed() = feed
     override fun users() = users
@@ -59,5 +61,6 @@ class NostrSocialImpl(
     override fun lists() = lists
     override fun channels() = channels
     override fun badges() = badges
+    override fun wallet() = wallet
     override fun nostr() = nostr
 }

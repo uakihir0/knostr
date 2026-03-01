@@ -17,6 +17,7 @@ import work.socialhub.knostr.social.api.ListResource
 import work.socialhub.knostr.social.api.PinResource
 import work.socialhub.knostr.social.api.PollResource
 import work.socialhub.knostr.social.api.RelayListResource
+import work.socialhub.knostr.social.api.WalletResource
 import work.socialhub.knostr.social.api.ZapResource
 import kotlin.js.JsExport
 
@@ -39,5 +40,6 @@ interface NostrSocial {
     fun lists(): ListResource
     fun channels(): ChannelResource
     fun badges(): BadgeResource
+    fun wallet(): WalletResource
     fun nostr(): Nostr
 }
