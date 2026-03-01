@@ -11,6 +11,7 @@ import work.socialhub.knostr.social.api.UserResource
 import work.socialhub.knostr.social.api.BookmarkResource
 import work.socialhub.knostr.social.api.InterestResource
 import work.socialhub.knostr.social.api.PinResource
+import work.socialhub.knostr.social.api.PollResource
 import work.socialhub.knostr.social.api.RelayListResource
 import work.socialhub.knostr.social.api.ZapResource
 import kotlin.js.JsExport
@@ -29,5 +30,6 @@ interface NostrSocial {
     fun bookmarks(): BookmarkResource
     fun pins(): PinResource
     fun interests(): InterestResource
+    fun polls(): PollResource
     fun nostr(): Nostr
 }
