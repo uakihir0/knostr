@@ -107,6 +107,10 @@ object InternalUtility {
                 val message = array[1].jsonPrimitive.content
                 RelayMessage.NoticeMsg(message)
             }
+            "AUTH" -> {
+                val challenge = array[1].jsonPrimitive.content
+                RelayMessage.AuthMsg(challenge)
+            }
             else -> throw NostrException("Unknown relay message type: $type")
         }
     }
@@ -138,5 +142,13 @@ object InternalUtility {
      */
     fun buildCloseMessage(subscriptionId: String): String {
         return """["CLOSE","$subscriptionId"]"""
+    }
+
+    /**
+     * Build a client AUTH message: ["AUTH", signedEvent] (NIP-42)
+     */
+    fun buildAuthMessage(event: NostrEvent): String {
+        val eventJson = json.encodeToString(event)
+        return """["AUTH",$eventJson]"""
     }
 }

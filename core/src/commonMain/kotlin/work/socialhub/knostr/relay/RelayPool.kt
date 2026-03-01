@@ -4,10 +4,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.NostrConfig
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
+import work.socialhub.knostr.entity.UnsignedEvent
+import work.socialhub.knostr.signing.NostrSigner
 import kotlin.random.Random
+import kotlin.time.Clock
 
 /**
  * Manages multiple relay connections.
@@ -28,10 +32,17 @@ class RelayPool {
     val isConnected: Boolean
         get() = connections.values.any { it.isOpen }
 
+    /** Signer for auto-auth (NIP-42) */
+    var signer: NostrSigner? = null
+
+    /** Whether to automatically respond to AUTH challenges (NIP-42) */
+    var autoAuth: Boolean = true
+
     /** Callbacks for pool-level events */
     var onEventCallback: ((String, NostrEvent) -> Unit)? = null
     var onOkCallback: ((String, Boolean, String) -> Unit)? = null
     var onNoticeCallback: ((String, String) -> Unit)? = null
+    var onAuthCallback: ((String, String) -> Unit)? = null
     var onErrorCallback: ((String, Exception) -> Unit)? = null
 
     /** Add a relay connection */
@@ -54,6 +65,9 @@ class RelayPool {
         connection.onNoticeCallback = { message ->
             onNoticeCallback?.invoke(url, message)
         }
+        connection.onAuthCallback = { challenge ->
+            handleAuth(url, challenge, connection)
+        }
         connection.onErrorCallback = { e ->
             onErrorCallback?.invoke(url, e)
         }
@@ -68,6 +82,7 @@ class RelayPool {
 
     /** Connect to all relays using the provided CoroutineScope */
     suspend fun connectAll(scope: CoroutineScope) {
+        poolScope = scope
         mutex.withLock {
             for (connection in connections.values) {
                 connection.setReconnectScope(scope)
@@ -136,6 +151,34 @@ class RelayPool {
     /** Clear seen event IDs cache */
     fun clearSeenEvents() {
         seenEventIds.clear()
+    }
+
+    private var poolScope: CoroutineScope? = null
+
+    private fun handleAuth(relayUrl: String, challenge: String, connection: RelayConnection) {
+        onAuthCallback?.invoke(relayUrl, challenge)
+
+        if (autoAuth) {
+            val s = signer ?: return
+            poolScope?.launch {
+                try {
+                    val unsigned = UnsignedEvent(
+                        pubkey = s.getPublicKey(),
+                        createdAt = Clock.System.now().epochSeconds,
+                        kind = EventKind.AUTH,
+                        tags = listOf(
+                            listOf("relay", relayUrl),
+                            listOf("challenge", challenge),
+                        ),
+                        content = "",
+                    )
+                    val signed = s.sign(unsigned)
+                    connection.sendAuth(signed)
+                } catch (e: Exception) {
+                    onErrorCallback?.invoke(relayUrl, e)
+                }
+            }
+        }
     }
 
     private fun handleEvent(relayUrl: String, subscriptionId: String, event: NostrEvent) {

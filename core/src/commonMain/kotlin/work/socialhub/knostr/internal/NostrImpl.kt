@@ -12,7 +12,10 @@ class NostrImpl(
     private val config: NostrConfig,
 ) : Nostr {
 
-    private val pool = RelayPool()
+    private val pool = RelayPool().also {
+        it.signer = config.signer
+        it.autoAuth = config.autoAuth
+    }
     private val events: EventResource = EventResourceImpl(config, pool)
     private val relays: RelayResource = RelayResourceImpl(config, pool)
     private val nip: NipResource = NipResourceImpl(config)

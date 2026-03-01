@@ -20,4 +20,7 @@ sealed class RelayMessage {
 
     /** Relay sends a human-readable notice */
     data class NoticeMsg(val message: String) : RelayMessage()
+
+    /** Relay requests authentication (NIP-42) */
+    data class AuthMsg(val challenge: String) : RelayMessage()
 }

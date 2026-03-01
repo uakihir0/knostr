@@ -25,4 +25,7 @@ class NostrConfig {
 
     /** Initial reconnection delay in milliseconds (exponential backoff) */
     var reconnectDelayMs: Long = 1_000
+
+    /** Whether to automatically respond to relay AUTH challenges (NIP-42) */
+    var autoAuth: Boolean = true
 }

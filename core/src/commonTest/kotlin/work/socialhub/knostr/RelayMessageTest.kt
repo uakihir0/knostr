@@ -63,4 +63,12 @@ class RelayMessageTest {
         assertIs<RelayMessage.NoticeMsg>(msg)
         assertEquals("server is shutting down", msg.message)
     }
+
+    @Test
+    fun testParseAuthMsg() {
+        val json = """["AUTH","challenge-string-123"]"""
+        val msg = InternalUtility.parseRelayMessage(json)
+        assertIs<RelayMessage.AuthMsg>(msg)
+        assertEquals("challenge-string-123", msg.challenge)
+    }
 }

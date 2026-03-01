@@ -20,6 +20,7 @@ object EventKind {
     const val ZAP_RECEIPT = 9735
     const val FILE_METADATA = 1063
     const val MUTE_LIST = 10000
+    const val AUTH = 22242
     const val RELAY_LIST = 10002
     const val DM_RELAY_LIST = 10050
 }

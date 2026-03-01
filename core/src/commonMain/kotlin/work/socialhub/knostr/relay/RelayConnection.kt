@@ -32,6 +32,7 @@ class RelayConnection(
     var onEoseCallback: ((String) -> Unit)? = null
     var onClosedCallback: ((String, String) -> Unit)? = null
     var onNoticeCallback: ((String) -> Unit)? = null
+    var onAuthCallback: ((String) -> Unit)? = null
     var onOpenCallback: (() -> Unit)? = null
     var onCloseCallback: (() -> Unit)? = null
     var onErrorCallback: ((Exception) -> Unit)? = null
@@ -83,6 +84,12 @@ class RelayConnection(
         client.sendText(message)
     }
 
+    /** Send an AUTH message: ["AUTH", signedEvent] (NIP-42) */
+    suspend fun sendAuth(event: NostrEvent) {
+        val message = InternalUtility.buildAuthMessage(event)
+        client.sendText(message)
+    }
+
     private fun setupClient() {
         client.url(url)
         client.textListener = { text ->
@@ -130,6 +137,7 @@ class RelayConnection(
                 is RelayMessage.EoseMsg -> onEoseCallback?.invoke(message.subscriptionId)
                 is RelayMessage.ClosedMsg -> onClosedCallback?.invoke(message.subscriptionId, message.message)
                 is RelayMessage.NoticeMsg -> onNoticeCallback?.invoke(message.message)
+                is RelayMessage.AuthMsg -> onAuthCallback?.invoke(message.challenge)
             }
         } catch (e: Exception) {
             onErrorCallback?.invoke(e)
