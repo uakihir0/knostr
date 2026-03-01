@@ -25,6 +25,15 @@ interface NipResource {
     /** Encode an event ID as note */
     fun encodeNote(eventId: String): String
 
+    /** Encode a public key with relay hints as nprofile (TLV) */
+    fun encodeNprofile(pubkey: String, relays: List<String> = listOf()): String
+
+    /** Encode an event ID with relay hints as nevent (TLV) */
+    fun encodeNevent(eventId: String, relays: List<String> = listOf(), author: String? = null): String
+
+    /** Encode an addressable event as naddr (TLV) */
+    fun encodeNaddr(identifier: String, pubkey: String, kind: Int, relays: List<String> = listOf()): String
+
     /** Decode a NIP-19 bech32 string */
     fun decodeNip19(encoded: String): Nip19Entity
 }
