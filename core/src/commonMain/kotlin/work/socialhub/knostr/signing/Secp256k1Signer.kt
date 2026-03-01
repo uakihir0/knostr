@@ -4,6 +4,7 @@ import work.socialhub.knostr.cipher.Secp256k1
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.internal.InternalUtility
+import work.socialhub.knostr.nip44.Nip44
 import work.socialhub.knostr.util.Hex
 
 /**
@@ -51,5 +52,15 @@ class Secp256k1Signer(
             content = event.content,
         )
         return InternalUtility.sha256Hex(serialized.encodeToByteArray())
+    }
+
+    override fun nip44Encrypt(plaintext: String, recipientPubkey: String): String {
+        val convKey = Nip44.deriveConversationKey(privateKeyHex, recipientPubkey)
+        return Nip44.encrypt(plaintext, convKey)
+    }
+
+    override fun nip44Decrypt(payload: String, senderPubkey: String): String {
+        val convKey = Nip44.deriveConversationKey(privateKeyHex, senderPubkey)
+        return Nip44.decrypt(payload, convKey)
     }
 }

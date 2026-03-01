@@ -16,4 +16,10 @@ interface NostrSigner {
 
     /** Compute the event ID (SHA-256 hash of serialized event) */
     fun computeEventId(event: UnsignedEvent): String
+
+    /** Encrypt plaintext using NIP-44 v2 for the given recipient */
+    fun nip44Encrypt(plaintext: String, recipientPubkey: String): String
+
+    /** Decrypt a NIP-44 v2 payload from the given sender */
+    fun nip44Decrypt(payload: String, senderPubkey: String): String
 }

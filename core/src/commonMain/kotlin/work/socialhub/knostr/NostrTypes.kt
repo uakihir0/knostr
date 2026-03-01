@@ -12,9 +12,14 @@ object EventKind {
     const val EVENT_DELETION = 5
     const val REPOST = 6
     const val REACTION = 7
+    const val SEAL = 13
+    const val CHAT_MESSAGE = 14
+    const val FILE_MESSAGE = 15
+    const val GIFT_WRAP = 1059
     const val ZAP_REQUEST = 9734
     const val ZAP_RECEIPT = 9735
     const val FILE_METADATA = 1063
     const val MUTE_LIST = 10000
     const val RELAY_LIST = 10002
+    const val DM_RELAY_LIST = 10050
 }
