@@ -1,6 +1,8 @@
 package work.socialhub.knostr.social.api
 
 import work.socialhub.knostr.api.response.Response
+import work.socialhub.knostr.entity.NostrEvent
+import work.socialhub.knostr.social.model.NostrFileMetadata
 import work.socialhub.knostr.social.model.NostrMedia
 import kotlin.js.JsExport
 
@@ -29,6 +31,36 @@ interface MediaResource {
      * @return The upload API URL
      */
     suspend fun getServerInfo(serverUrl: String): Response<String>
+
+    /** Publish file metadata event (NIP-94, kind:1063) */
+    suspend fun publishFileMetadata(
+        url: String,
+        mimeType: String,
+        sha256: String? = null,
+        sizeBytes: Long? = null,
+        dimensions: String? = null,
+        blurhash: String? = null,
+        thumbnailUrl: String? = null,
+        description: String? = null,
+    ): Response<NostrEvent>
+
+    /** Get file metadata for a URL */
+    suspend fun getFileMetadata(url: String): Response<NostrFileMetadata?>
+
+    @JsExport.Ignore
+    fun publishFileMetadataBlocking(
+        url: String,
+        mimeType: String,
+        sha256: String? = null,
+        sizeBytes: Long? = null,
+        dimensions: String? = null,
+        blurhash: String? = null,
+        thumbnailUrl: String? = null,
+        description: String? = null,
+    ): Response<NostrEvent>
+
+    @JsExport.Ignore
+    fun getFileMetadataBlocking(url: String): Response<NostrFileMetadata?>
 
     @JsExport.Ignore
     fun uploadBlocking(

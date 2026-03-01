@@ -4,12 +4,16 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.NostrException
 import work.socialhub.knostr.api.response.Response
+import work.socialhub.knostr.entity.NostrEvent
+import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.internal.InternalUtility
 import work.socialhub.knostr.social.api.MediaResource
+import work.socialhub.knostr.social.model.NostrFileMetadata
 import work.socialhub.knostr.social.model.NostrMedia
 import work.socialhub.knostr.util.toBlocking
 import work.socialhub.khttpclient.HttpRequest
@@ -127,6 +131,72 @@ class MediaResourceImpl(
         return Response(media)
     }
 
+    override suspend fun publishFileMetadata(
+        url: String,
+        mimeType: String,
+        sha256: String?,
+        sizeBytes: Long?,
+        dimensions: String?,
+        blurhash: String?,
+        thumbnailUrl: String?,
+        description: String?,
+    ): Response<NostrEvent> {
+        val signer = nostr.signer()
+            ?: throw NostrException("Signer is required to publish file metadata")
+
+        val tags = mutableListOf<List<String>>()
+        tags.add(listOf("url", url))
+        tags.add(listOf("m", mimeType))
+        if (sha256 != null) tags.add(listOf("x", sha256))
+        if (sizeBytes != null) tags.add(listOf("size", sizeBytes.toString()))
+        if (dimensions != null) tags.add(listOf("dim", dimensions))
+        if (blurhash != null) tags.add(listOf("blurhash", blurhash))
+        if (thumbnailUrl != null) tags.add(listOf("thumb", thumbnailUrl))
+        if (description != null) tags.add(listOf("alt", description))
+
+        val unsigned = UnsignedEvent(
+            pubkey = signer.getPublicKey(),
+            createdAt = Clock.System.now().epochSeconds,
+            kind = EventKind.FILE_METADATA,
+            tags = tags,
+            content = description ?: "",
+        )
+        val signed = signer.sign(unsigned)
+        nostr.events().publishEvent(signed)
+        return Response(signed)
+    }
+
+    override suspend fun getFileMetadata(url: String): Response<NostrFileMetadata?> {
+        val filter = NostrFilter(
+            kinds = listOf(EventKind.FILE_METADATA),
+            limit = 50,
+        )
+        val response = nostr.events().queryEvents(listOf(filter))
+        val event = response.data.firstOrNull { e ->
+            e.tags.any { it.size >= 2 && it[0] == "url" && it[1] == url }
+        }
+        if (event == null) return Response(null)
+
+        val metadata = NostrFileMetadata()
+        metadata.event = event
+        metadata.createdAt = event.createdAt
+        metadata.description = event.content.ifEmpty { null }
+        for (tag in event.tags) {
+            if (tag.size < 2) continue
+            when (tag[0]) {
+                "url" -> metadata.url = tag[1]
+                "m" -> metadata.mimeType = tag[1]
+                "x" -> metadata.sha256 = tag[1]
+                "size" -> metadata.sizeBytes = tag[1].toLongOrNull()
+                "dim" -> metadata.dimensions = tag[1]
+                "blurhash" -> metadata.blurhash = tag[1]
+                "thumb" -> metadata.thumbnailUrl = tag[1]
+                "alt" -> if (metadata.description == null) metadata.description = tag[1]
+            }
+        }
+        return Response(metadata)
+    }
+
     private fun createHttpAuthEvent(url: String, method: String): work.socialhub.knostr.entity.NostrEvent {
         val signer = nostr.signer()!!
         val unsigned = UnsignedEvent(
@@ -154,6 +224,23 @@ class MediaResourceImpl(
 
     override fun getServerInfoBlocking(serverUrl: String): Response<String> {
         return toBlocking { getServerInfo(serverUrl) }
+    }
+
+    override fun publishFileMetadataBlocking(
+        url: String,
+        mimeType: String,
+        sha256: String?,
+        sizeBytes: Long?,
+        dimensions: String?,
+        blurhash: String?,
+        thumbnailUrl: String?,
+        description: String?,
+    ): Response<NostrEvent> {
+        return toBlocking { publishFileMetadata(url, mimeType, sha256, sizeBytes, dimensions, blurhash, thumbnailUrl, description) }
+    }
+
+    override fun getFileMetadataBlocking(url: String): Response<NostrFileMetadata?> {
+        return toBlocking { getFileMetadata(url) }
     }
 
     companion object {
