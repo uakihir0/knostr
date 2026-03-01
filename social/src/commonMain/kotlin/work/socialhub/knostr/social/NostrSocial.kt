@@ -8,6 +8,7 @@ import work.socialhub.knostr.social.api.MuteResource
 import work.socialhub.knostr.social.api.ReactionResource
 import work.socialhub.knostr.social.api.SearchResource
 import work.socialhub.knostr.social.api.UserResource
+import work.socialhub.knostr.social.api.BookmarkResource
 import work.socialhub.knostr.social.api.RelayListResource
 import work.socialhub.knostr.social.api.ZapResource
 import kotlin.js.JsExport
@@ -23,5 +24,6 @@ interface NostrSocial {
     fun mutes(): MuteResource
     fun messages(): MessageResource
     fun relayList(): RelayListResource
+    fun bookmarks(): BookmarkResource
     fun nostr(): Nostr
 }
