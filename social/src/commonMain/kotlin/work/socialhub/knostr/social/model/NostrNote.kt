@@ -20,4 +20,6 @@ class NostrNote {
     var noteId: String = ""
     /** NIP-36 content warning reason (null if no warning) */
     var contentWarning: String? = null
+    /** NIP-18: quoted event ID (q tag) */
+    var quotedEventId: String? = null
 }

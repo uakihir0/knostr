@@ -222,6 +222,28 @@ class FeedResourceImpl(
         return Response(signed)
     }
 
+    override suspend fun quoteRepost(eventId: String, comment: String, contentWarning: String?): Response<NostrEvent> {
+        val signer = nostr.signer()
+            ?: throw NostrException("Signer is required to quote repost")
+
+        val tags = mutableListOf<List<String>>()
+        tags.add(listOf("q", eventId))
+        if (contentWarning != null) {
+            tags.add(listOf("content-warning", contentWarning))
+        }
+
+        val unsigned = UnsignedEvent(
+            pubkey = signer.getPublicKey(),
+            createdAt = Clock.System.now().epochSeconds,
+            kind = EventKind.TEXT_NOTE,
+            tags = tags,
+            content = comment,
+        )
+        val signed = signer.sign(unsigned)
+        nostr.events().publishEvent(signed)
+        return Response(signed)
+    }
+
     override suspend fun delete(eventId: String, reason: String): Response<Boolean> {
         return nostr.events().deleteEvent(eventId, reason)
     }
@@ -256,6 +278,10 @@ class FeedResourceImpl(
 
     override fun repostBlocking(eventId: String): Response<NostrEvent> {
         return toBlocking { repost(eventId) }
+    }
+
+    override fun quoteRepostBlocking(eventId: String, comment: String, contentWarning: String?): Response<NostrEvent> {
+        return toBlocking { quoteRepost(eventId, comment, contentWarning) }
     }
 
     override fun deleteBlocking(eventId: String, reason: String): Response<Boolean> {

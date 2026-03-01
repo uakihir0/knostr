@@ -33,6 +33,9 @@ interface FeedResource {
     /** Repost a note (kind:6) */
     suspend fun repost(eventId: String): Response<NostrEvent>
 
+    /** Quote repost a note (kind:1 with q tag, NIP-18) */
+    suspend fun quoteRepost(eventId: String, comment: String, contentWarning: String? = null): Response<NostrEvent>
+
     /** Delete a note (kind:5) */
     suspend fun delete(eventId: String, reason: String = ""): Response<Boolean>
 
@@ -59,6 +62,9 @@ interface FeedResource {
 
     @JsExport.Ignore
     fun repostBlocking(eventId: String): Response<NostrEvent>
+
+    @JsExport.Ignore
+    fun quoteRepostBlocking(eventId: String, comment: String, contentWarning: String? = null): Response<NostrEvent>
 
     @JsExport.Ignore
     fun deleteBlocking(eventId: String, reason: String = ""): Response<Boolean>

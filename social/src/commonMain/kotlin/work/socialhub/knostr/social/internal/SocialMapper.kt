@@ -51,6 +51,11 @@ object SocialMapper {
                 .firstOrNull { it.size >= 2 && it[0] == "content-warning" }
                 ?.get(1)
 
+            // NIP-18: quote repost (q tag)
+            quotedEventId = event.tags
+                .firstOrNull { it.size >= 2 && it[0] == "q" }
+                ?.get(1)
+
             // Parse NIP-10 reply threading from e-tags
             for (tag in event.tags) {
                 if (tag.size >= 2 && tag[0] == "e") {

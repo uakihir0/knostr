@@ -12,6 +12,7 @@ object EventKind {
     const val EVENT_DELETION = 5
     const val REPOST = 6
     const val REACTION = 7
+    const val GENERIC_REPOST = 16
     const val SEAL = 13
     const val CHAT_MESSAGE = 14
     const val FILE_MESSAGE = 15
