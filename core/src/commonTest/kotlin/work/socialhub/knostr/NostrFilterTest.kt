@@ -48,6 +48,57 @@ class NostrFilterTest {
     }
 
     @Test
+    fun testSerialize_withTTags() {
+        val filter = NostrFilter(
+            tTags = listOf("nostr", "bitcoin"),
+        )
+        val json = InternalUtility.toJson(filter)
+        assertTrue(json.contains("\"#t\""))
+        assertTrue(json.contains("nostr"))
+        assertTrue(json.contains("bitcoin"))
+    }
+
+    @Test
+    fun testSerialize_withDTags() {
+        val filter = NostrFilter(
+            dTags = listOf("bookmark"),
+        )
+        val json = InternalUtility.toJson(filter)
+        assertTrue(json.contains("\"#d\""))
+        assertTrue(json.contains("bookmark"))
+    }
+
+    @Test
+    fun testSerialize_withATags() {
+        val filter = NostrFilter(
+            aTags = listOf("30023:pubkey:article-slug"),
+        )
+        val json = InternalUtility.toJson(filter)
+        assertTrue(json.contains("\"#a\""))
+        assertTrue(json.contains("30023:pubkey:article-slug"))
+    }
+
+    @Test
+    fun testSerialize_nullOmitsNewTags() {
+        val filter = NostrFilter(
+            kinds = listOf(1),
+        )
+        val json = InternalUtility.toJson(filter)
+        assertFalse(json.contains("\"#t\""))
+        assertFalse(json.contains("\"#d\""))
+        assertFalse(json.contains("\"#a\""))
+    }
+
+    @Test
+    fun testDeserialize_withNewTags() {
+        val json = """{"kinds":[30001],"#d":["bookmark"],"#t":["nostr"],"#a":["30023:pk:slug"]}"""
+        val filter = InternalUtility.fromJson<NostrFilter>(json)
+        assertEquals(listOf("bookmark"), filter.dTags)
+        assertEquals(listOf("nostr"), filter.tTags)
+        assertEquals(listOf("30023:pk:slug"), filter.aTags)
+    }
+
+    @Test
     fun testDeserialize() {
         val json = """{"kinds":[1,6],"authors":["abc"],"#e":["evt1"],"limit":50}"""
         val filter = InternalUtility.fromJson<NostrFilter>(json)
