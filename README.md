@@ -231,6 +231,39 @@ val media = social.media().upload(
 println("Uploaded: ${media.url}")
 ```
 
+### Direct Messages (Social)
+
+```kotlin
+val social = NostrSocialFactory.instance(nostr)
+
+// NIP-17: Send a private DM (Gift Wrap pattern)
+social.messages().sendMessage(
+    recipientPubkey = "recipient-pubkey-hex",
+    content = "Hello via NIP-17!",
+)
+
+// NIP-17: Get received DMs
+val messages = social.messages().getMessages(limit = 20).data
+messages.forEach { msg ->
+    println("${msg.senderPubkey}: ${msg.content}")
+}
+
+// NIP-17: Get conversation with a specific user
+val conversation = social.messages().getConversation(
+    pubkey = "other-user-pubkey-hex",
+    limit = 50,
+).data
+
+// NIP-04 (legacy): Send an encrypted DM
+social.messages().sendLegacyMessage(
+    recipientPubkey = "recipient-pubkey-hex",
+    content = "Hello via NIP-04!",
+)
+
+// NIP-04 (legacy): Get received legacy DMs
+val legacyMessages = social.messages().getLegacyMessages(limit = 20).data
+```
+
 ### NIP Utilities (Core)
 
 ```kotlin
@@ -253,6 +286,7 @@ val result = nostr.nip().resolveNip05("user@example.com")
 | `zaps()` | `createZapRequest`, `getZapsForEvent`, `getZapsForUser`, `getLnurlPayInfo` | Lightning Zaps (NIP-57) |
 | `media()` | `upload`, `getServerInfo` | File upload (NIP-96) |
 | `mutes()` | `mute`, `unmute`, `getMuteList` | User muting (NIP-51) |
+| `messages()` | `sendMessage`, `getMessages`, `getConversation`, `sendLegacyMessage`, `getLegacyMessages` | Direct messages (NIP-17 / NIP-04) |
 
 All methods have both `suspend` (async) and `Blocking` (sync) variants.
 
@@ -262,15 +296,19 @@ All methods have both `suspend` (async) and `Blocking` (sync) variants.
 |-----|-------------|--------|
 | NIP-01 | Basic protocol | Implemented |
 | NIP-02 | Follow list (kind:3) | Implemented |
+| NIP-04 | Encrypted DM (legacy, kind:4) | Implemented |
 | NIP-05 | DNS identity verification | Implemented |
 | NIP-09 | Event deletion (kind:5) | Implemented |
 | NIP-10 | Reply threading (e-tag markers) | Implemented |
+| NIP-17 | Private Direct Messages (Gift Wrap) | Implemented |
 | NIP-18 | Reposts (kind:6) | Implemented |
 | NIP-19 | Bech32 encoding (npub, nsec, note) | Implemented |
 | NIP-25 | Reactions (kind:7) | Implemented |
+| NIP-44 | Versioned Encryption | Implemented |
 | NIP-50 | Search | Implemented |
 | NIP-51 | Mute list (kind:10000) | Implemented |
 | NIP-57 | Lightning Zaps | Implemented |
+| NIP-59 | Gift Wrap | Implemented |
 | NIP-96 | File upload | Implemented |
 | NIP-98 | HTTP Auth (for NIP-96) | Implemented |
 

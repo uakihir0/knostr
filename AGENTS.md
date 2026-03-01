@@ -56,9 +56,14 @@ knostr/
 
 | Class | Purpose |
 |-------|---------|
-| `Secp256k1` | Public API — `pubkeyCreate()`, `signSchnorr()`, `verifySchnorr()` |
+| `Secp256k1` | Public API — `pubkeyCreate()`, `signSchnorr()`, `verifySchnorr()`, `computeSharedSecret()` |
 | `UInt256` | 256-bit unsigned integer arithmetic |
 | `Sha256` | Pure Kotlin SHA-256 hash |
+| `HmacSha256` | HMAC-SHA256 (RFC 2104) |
+| `Hkdf` | HKDF Extract/Expand (RFC 5869, SHA-256) |
+| `ChaCha20` | ChaCha20 stream cipher (RFC 8439) |
+| `Aes` | AES-256 block cipher (FIPS 197) |
+| `AesCbc` | AES-256-CBC mode with PKCS7 padding |
 | `ECMath` | Elliptic curve point operations (add, double, multiply) |
 | `ECPoint` | Affine/Infinity point representation |
 | `JacobianPoint` | Projective coordinates for efficient computation |
@@ -73,7 +78,9 @@ knostr/
 |---------|---------|
 | `entity/` | Data models: `NostrEvent`, `NostrFilter`, `NostrProfile`, `Nip05Result`, `Nip19Entity` |
 | `relay/` | WebSocket relay management: `RelayConnection`, `RelayPool`, `RelayMessage`, `Subscription` |
-| `signing/` | Event signing: `NostrSigner` interface, `Secp256k1Signer` (uses cipher module) |
+| `signing/` | Event signing + encryption: `NostrSigner` interface, `Secp256k1Signer` (NIP-44, NIP-04) |
+| `nip44/` | NIP-44 v2 encryption: `Nip44` (ECDH + HKDF + ChaCha20 + HMAC-SHA256), `Nip44Padding` |
+| `nip04/` | NIP-04 legacy encryption: `Nip04` (ECDH + AES-256-CBC) |
 | `api/` | Resource interfaces: `EventResource`, `RelayResource`, `NipResource` |
 | `internal/` | Implementations: `NostrImpl`, `EventResourceImpl`, `RelayResourceImpl`, `NipResourceImpl` |
 | `util/` | Utilities: `Hex`, `Bech32`, `BlockingUtil` |
@@ -82,8 +89,8 @@ knostr/
 
 | Package | Purpose |
 |---------|---------|
-| `model/` | SNS models: `NostrUser`, `NostrNote`, `NostrReaction`, `NostrThread`, `NostrZap`, `NostrMedia` |
-| `api/` | Resource interfaces: `FeedResource`, `UserResource`, `ReactionResource`, `SearchResource`, `ZapResource`, `MediaResource`, `MuteResource` |
+| `model/` | SNS models: `NostrUser`, `NostrNote`, `NostrReaction`, `NostrThread`, `NostrZap`, `NostrMedia`, `NostrDirectMessage` |
+| `api/` | Resource interfaces: `FeedResource`, `UserResource`, `ReactionResource`, `SearchResource`, `ZapResource`, `MediaResource`, `MuteResource`, `MessageResource` |
 | `stream/` | Real-time subscriptions: `TimelineStream`, `NotificationStream` |
 | `internal/` | Implementations: `NostrSocialImpl`, `SocialMapper`, `*ResourceImpl` |
 
@@ -98,16 +105,17 @@ knostr/
 | `zaps()` | `createZapRequest`, `getZapsForEvent`, `getZapsForUser`, `getLnurlPayInfo` | Lightning Zaps (NIP-57) |
 | `media()` | `upload`, `getServerInfo` | File upload (NIP-96) |
 | `mutes()` | `mute`, `unmute`, `getMuteList` | User muting (NIP-51) |
+| `messages()` | `sendMessage`, `getMessages`, `getConversation`, `sendLegacyMessage`, `getLegacyMessages` | Direct messages (NIP-17 / NIP-04) |
 
 All methods have both `suspend` (async) and `Blocking` (sync) variants.
 
 ## Nostr Protocol Concepts
 
 - **Events**: JSON objects signed with Schnorr (BIP-340). Identified by SHA-256 hash.
-- **Kinds**: Integer type identifiers. 0=metadata, 1=text note, 3=follow list, 5=deletion, 6=repost, 7=reaction, 9734=zap request, 9735=zap receipt, 10000=mute list.
+- **Kinds**: Integer type identifiers. 0=metadata, 1=text note, 3=follow list, 4=encrypted DM (legacy), 5=deletion, 6=repost, 7=reaction, 13=seal, 14=chat message, 1059=gift wrap, 9734=zap request, 9735=zap receipt, 10000=mute list.
 - **Relays**: WebSocket servers that store/forward events. Clients connect to multiple relays.
 - **Filters**: JSON objects specifying event queries (by author, kind, tags, time range).
-- **NIPs**: NIP-01 (base protocol), NIP-02 (follow list), NIP-05 (DNS identity), NIP-09 (deletion), NIP-10 (reply threading), NIP-18 (reposts), NIP-19 (bech32 encoding), NIP-25 (reactions), NIP-50 (search), NIP-51 (mute list), NIP-57 (zaps), NIP-96 (file upload), NIP-98 (HTTP auth).
+- **NIPs**: NIP-01 (base protocol), NIP-02 (follow list), NIP-04 (encrypted DM, legacy), NIP-05 (DNS identity), NIP-09 (deletion), NIP-10 (reply threading), NIP-17 (private DMs), NIP-18 (reposts), NIP-19 (bech32 encoding), NIP-25 (reactions), NIP-44 (versioned encryption), NIP-50 (search), NIP-51 (mute list), NIP-57 (zaps), NIP-59 (gift wrap), NIP-96 (file upload), NIP-98 (HTTP auth).
 
 ## Key Patterns
 
@@ -169,10 +177,14 @@ Tests require `secrets.json` at the project root with relay URLs and private key
 ### Cipher Tests
 
 In `cipher/src/commonTest/kotlin/work/socialhub/knostr/cipher/`:
-- `Secp256k1Test.kt` — Official BIP-340 test vectors, sign/verify round-trips
+- `Secp256k1Test.kt` — Official BIP-340 test vectors, sign/verify round-trips, ECDH
 - `UInt256Test.kt` — 256-bit integer arithmetic
 - `ModularArithmeticTest.kt` — Modular arithmetic
 - `ECMathTest.kt` — Elliptic curve operations
+- `HmacSha256Test.kt` — RFC 4231 test vectors
+- `HkdfTest.kt` — RFC 5869 test vectors
+- `ChaCha20Test.kt` — RFC 8439 test vectors
+- `AesTest.kt` — NIST FIPS 197 + SP 800-38A test vectors
 
 ### Social Tests
 
@@ -185,12 +197,17 @@ In `social/src/jvmTest/kotlin/work/socialhub/knostr/social/`:
 - `ZapResourceTest.kt` — Zap request creation, zap receipt querying
 - `MediaResourceTest.kt` — NIP-96 server info, image upload and post
 - `MuteResourceTest.kt` — Mute, unmute, getMuteList
+- `MessageResourceTest.kt` — NIP-17 Gift Wrap DM send/receive, NIP-04 legacy DM send/receive
+
+### Core Tests
+
+In `core/src/commonTest/kotlin/work/socialhub/knostr/`:
+- `Nip44Test.kt` — NIP-44 v2 encrypt/decrypt round-trips, Unicode, long messages
 
 **Note**: Tests use `runBlocking` with a separate `CoroutineScope(Dispatchers.Default + SupervisorJob())` for relay connections because WebSocket connections are long-lived and block `coroutineScope`.
 
 ## Scope / Not Yet Implemented
 
-- NIP-04/NIP-17 encrypted DMs
 - NIP-42 relay authentication
 - NIP-65 relay list management
 - NIP-07 browser extension (JS)

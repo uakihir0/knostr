@@ -230,6 +230,39 @@ val media = social.media().upload(
 println("アップロード完了: ${media.url}")
 ```
 
+### ダイレクトメッセージ (Social)
+
+```kotlin
+val social = NostrSocialFactory.instance(nostr)
+
+// NIP-17: プライベート DM を送信 (Gift Wrap パターン)
+social.messages().sendMessage(
+    recipientPubkey = "recipient-pubkey-hex",
+    content = "NIP-17 で送信!",
+)
+
+// NIP-17: 受信した DM を取得
+val messages = social.messages().getMessages(limit = 20).data
+messages.forEach { msg ->
+    println("${msg.senderPubkey}: ${msg.content}")
+}
+
+// NIP-17: 特定ユーザーとの会話を取得
+val conversation = social.messages().getConversation(
+    pubkey = "other-user-pubkey-hex",
+    limit = 50,
+).data
+
+// NIP-04 (レガシー): 暗号化 DM を送信
+social.messages().sendLegacyMessage(
+    recipientPubkey = "recipient-pubkey-hex",
+    content = "NIP-04 で送信!",
+)
+
+// NIP-04 (レガシー): レガシー DM を取得
+val legacyMessages = social.messages().getLegacyMessages(limit = 20).data
+```
+
 ### NIP ユーティリティ (Core)
 
 ```kotlin
@@ -252,6 +285,7 @@ val result = nostr.nip().resolveNip05("user@example.com")
 | `zaps()` | `createZapRequest`, `getZapsForEvent`, `getZapsForUser`, `getLnurlPayInfo` | Lightning Zaps (NIP-57) |
 | `media()` | `upload`, `getServerInfo` | ファイルアップロード (NIP-96) |
 | `mutes()` | `mute`, `unmute`, `getMuteList` | ユーザーミュート (NIP-51) |
+| `messages()` | `sendMessage`, `getMessages`, `getConversation`, `sendLegacyMessage`, `getLegacyMessages` | ダイレクトメッセージ (NIP-17 / NIP-04) |
 
 全メソッドに `suspend` (非同期) と `Blocking` (同期) の両方があります。
 
@@ -261,15 +295,19 @@ val result = nostr.nip().resolveNip05("user@example.com")
 |-----|------|------|
 | NIP-01 | 基本プロトコル | 実装済み |
 | NIP-02 | フォローリスト (kind:3) | 実装済み |
+| NIP-04 | 暗号化 DM (レガシー, kind:4) | 実装済み |
 | NIP-05 | DNS ベースの ID 検証 | 実装済み |
 | NIP-09 | イベント削除 (kind:5) | 実装済み |
 | NIP-10 | リプライスレッド (e-tag マーカー) | 実装済み |
+| NIP-17 | プライベート DM (Gift Wrap) | 実装済み |
 | NIP-18 | リポスト (kind:6) | 実装済み |
 | NIP-19 | Bech32 エンコーディング (npub, nsec, note) | 実装済み |
 | NIP-25 | リアクション (kind:7) | 実装済み |
+| NIP-44 | バージョン付き暗号化 | 実装済み |
 | NIP-50 | 検索 | 実装済み |
 | NIP-51 | ミュートリスト (kind:10000) | 実装済み |
 | NIP-57 | Lightning Zaps | 実装済み |
+| NIP-59 | Gift Wrap | 実装済み |
 | NIP-96 | ファイルアップロード | 実装済み |
 | NIP-98 | HTTP 認証 (NIP-96 用) | 実装済み |
 
