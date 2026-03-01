@@ -9,6 +9,7 @@ import work.socialhub.knostr.social.api.MuteResource
 import work.socialhub.knostr.social.api.ReactionResource
 import work.socialhub.knostr.social.api.SearchResource
 import work.socialhub.knostr.social.api.UserResource
+import work.socialhub.knostr.social.api.AppDataResource
 import work.socialhub.knostr.social.api.ArticleResource
 import work.socialhub.knostr.social.api.BadgeResource
 import work.socialhub.knostr.social.api.BookmarkResource
@@ -43,6 +44,7 @@ class NostrSocialImpl(
     private val channels: ChannelResource = ChannelResourceImpl(nostr)
     private val badges: BadgeResource = BadgeResourceImpl(nostr)
     private val wallet: WalletResource = WalletResourceImpl()
+    private val appData: AppDataResource = AppDataResourceImpl(nostr)
 
     override fun feed() = feed
     override fun users() = users
@@ -62,5 +64,6 @@ class NostrSocialImpl(
     override fun channels() = channels
     override fun badges() = badges
     override fun wallet() = wallet
+    override fun appData() = appData
     override fun nostr() = nostr
 }

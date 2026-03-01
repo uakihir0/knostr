@@ -8,6 +8,7 @@ import work.socialhub.knostr.social.api.MuteResource
 import work.socialhub.knostr.social.api.ReactionResource
 import work.socialhub.knostr.social.api.SearchResource
 import work.socialhub.knostr.social.api.UserResource
+import work.socialhub.knostr.social.api.AppDataResource
 import work.socialhub.knostr.social.api.ArticleResource
 import work.socialhub.knostr.social.api.BadgeResource
 import work.socialhub.knostr.social.api.BookmarkResource
@@ -41,5 +42,6 @@ interface NostrSocial {
     fun channels(): ChannelResource
     fun badges(): BadgeResource
     fun wallet(): WalletResource
+    fun appData(): AppDataResource
     fun nostr(): Nostr
 }
