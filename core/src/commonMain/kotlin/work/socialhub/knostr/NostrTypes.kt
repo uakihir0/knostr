@@ -29,5 +29,7 @@ object EventKind {
     const val INTEREST_LIST = 10015
     const val POLL = 1068
     const val POLL_RESPONSE = 1018
+    const val LONG_FORM = 30023
+    const val PEOPLE_LIST = 30000
     const val USER_STATUS = 30315
 }
