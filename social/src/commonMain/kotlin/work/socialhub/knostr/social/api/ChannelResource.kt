@@ -27,6 +27,15 @@ interface ChannelResource {
     /** Get list of channels */
     suspend fun getChannels(limit: Int = 50): Response<List<NostrChannel>>
 
+    /** Get user's joined channels list (NIP-51, kind:10005) */
+    suspend fun getJoinedChannels(): Response<List<String>>
+
+    /** Join a channel (add to kind:10005 list) */
+    suspend fun joinChannel(channelId: String): Response<NostrEvent>
+
+    /** Leave a channel (remove from kind:10005 list) */
+    suspend fun leaveChannel(channelId: String): Response<NostrEvent>
+
     @JsExport.Ignore
     fun createChannelBlocking(name: String, about: String = "", picture: String = ""): Response<NostrEvent>
 
@@ -44,4 +53,13 @@ interface ChannelResource {
 
     @JsExport.Ignore
     fun getChannelsBlocking(limit: Int = 50): Response<List<NostrChannel>>
+
+    @JsExport.Ignore
+    fun getJoinedChannelsBlocking(): Response<List<String>>
+
+    @JsExport.Ignore
+    fun joinChannelBlocking(channelId: String): Response<NostrEvent>
+
+    @JsExport.Ignore
+    fun leaveChannelBlocking(channelId: String): Response<NostrEvent>
 }

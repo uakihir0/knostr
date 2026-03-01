@@ -9,6 +9,7 @@ import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.internal.InternalUtility
+import work.socialhub.knostr.signing.NostrSigner
 import work.socialhub.knostr.social.api.ChannelResource
 import work.socialhub.knostr.social.model.NostrChannel
 import work.socialhub.knostr.social.model.NostrChannelMessage
@@ -194,5 +195,79 @@ class ChannelResourceImpl(
 
     override fun getChannelsBlocking(limit: Int): Response<List<NostrChannel>> {
         return toBlocking { getChannels(limit) }
+    }
+
+    // NIP-51 Public Chats List (kind:10005)
+
+    override suspend fun getJoinedChannels(): Response<List<String>> {
+        val tags = getPublicChatsListTags()
+        val channelIds = tags
+            .filter { it.size >= 2 && it[0] == "e" }
+            .map { it[1] }
+        return Response(channelIds)
+    }
+
+    override suspend fun joinChannel(channelId: String): Response<NostrEvent> {
+        val signer = nostr.signer()
+            ?: throw NostrException("Signer is required to join channel")
+
+        val currentTags = getPublicChatsListTags()
+        val tags = currentTags.toMutableList()
+        if (tags.none { it.size >= 2 && it[0] == "e" && it[1] == channelId }) {
+            tags.add(listOf("e", channelId))
+        }
+
+        return publishPublicChatsList(signer, tags)
+    }
+
+    override suspend fun leaveChannel(channelId: String): Response<NostrEvent> {
+        val signer = nostr.signer()
+            ?: throw NostrException("Signer is required to leave channel")
+
+        val currentTags = getPublicChatsListTags()
+        val tags = currentTags.filter { !(it.size >= 2 && it[0] == "e" && it[1] == channelId) }
+
+        return publishPublicChatsList(signer, tags)
+    }
+
+    private suspend fun getPublicChatsListTags(): List<List<String>> {
+        val signer = nostr.signer()
+            ?: throw NostrException("Signer is required to get public chats list")
+
+        val filter = NostrFilter(
+            authors = listOf(signer.getPublicKey()),
+            kinds = listOf(EventKind.PUBLIC_CHATS_LIST),
+            limit = 1,
+        )
+        val response = nostr.events().queryEvents(listOf(filter))
+        return response.data.firstOrNull()?.tags ?: listOf()
+    }
+
+    private suspend fun publishPublicChatsList(
+        signer: NostrSigner,
+        tags: List<List<String>>,
+    ): Response<NostrEvent> {
+        val unsigned = UnsignedEvent(
+            pubkey = signer.getPublicKey(),
+            createdAt = Clock.System.now().epochSeconds,
+            kind = EventKind.PUBLIC_CHATS_LIST,
+            tags = tags,
+            content = "",
+        )
+        val signed = signer.sign(unsigned)
+        nostr.events().publishEvent(signed)
+        return Response(signed)
+    }
+
+    override fun getJoinedChannelsBlocking(): Response<List<String>> {
+        return toBlocking { getJoinedChannels() }
+    }
+
+    override fun joinChannelBlocking(channelId: String): Response<NostrEvent> {
+        return toBlocking { joinChannel(channelId) }
+    }
+
+    override fun leaveChannelBlocking(channelId: String): Response<NostrEvent> {
+        return toBlocking { leaveChannel(channelId) }
     }
 }
