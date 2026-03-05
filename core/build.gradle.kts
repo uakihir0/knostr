@@ -9,6 +9,8 @@ plugins {
 }
 
 kotlin {
+    applyDefaultHierarchyTemplate()
+
     jvm {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
