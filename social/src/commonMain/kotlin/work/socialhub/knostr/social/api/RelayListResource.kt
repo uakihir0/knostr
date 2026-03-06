@@ -4,6 +4,7 @@ import work.socialhub.knostr.api.response.Response
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.social.model.NostrRelayListEntry
 import kotlin.js.JsExport
+import kotlin.js.JsName
 
 @JsExport
 interface RelayListResource {
@@ -12,6 +13,7 @@ interface RelayListResource {
     suspend fun getRelayList(): Response<List<NostrRelayListEntry>>
 
     /** Get relay list for a specific user */
+    @JsName("getRelayListByPubkey")
     suspend fun getRelayList(pubkey: String): Response<List<NostrRelayListEntry>>
 
     /** Set relay list (replaces existing, kind:10002) */

@@ -4,6 +4,7 @@ import work.socialhub.knostr.api.response.Response
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.social.model.NostrList
 import kotlin.js.JsExport
+import kotlin.js.JsName
 
 @JsExport
 interface ListResource {
@@ -24,6 +25,7 @@ interface ListResource {
     suspend fun getLists(): Response<List<NostrList>>
 
     /** Get all lists for a specific user */
+    @JsName("getListsByPubkey")
     suspend fun getLists(pubkey: String): Response<List<NostrList>>
 
     @JsExport.Ignore
