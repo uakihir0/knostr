@@ -49,6 +49,7 @@ class FeedResourceImpl(
         )
         val feedResponse = nostr.events().queryEvents(listOf(feedFilter))
         val notes = feedResponse.data.map { SocialMapper.toNote(it) }
+        populateLikeCounts(notes)
 
         return Response(notes)
     }
@@ -61,7 +62,28 @@ class FeedResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
         val event = response.data.firstOrNull()
             ?: throw NostrException("Note not found: $eventId")
-        return Response(SocialMapper.toNote(event))
+        val note = SocialMapper.toNote(event)
+
+        // Fetch reactions to populate likeCount
+        val reactionFilter = NostrFilter(
+            eTags = listOf(eventId),
+            kinds = listOf(EventKind.REACTION),
+            limit = 1000,
+        )
+        val reactionResponse = nostr.events().queryEvents(listOf(reactionFilter))
+        note.likeCount = SocialMapper.countLikes(reactionResponse.data)
+
+        // Resolve quoted note if q-tag present
+        if (note.quotedEventId != null) {
+            try {
+                val quotedResponse = getNote(note.quotedEventId!!)
+                note.quotedNote = quotedResponse.data
+            } catch (_: Exception) {
+                // Ignore if quoted note not found
+            }
+        }
+
+        return Response(note)
     }
 
     override suspend fun getUserFeed(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
@@ -74,6 +96,7 @@ class FeedResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val notes = response.data.map { SocialMapper.toNote(it) }
+        populateLikeCounts(notes)
         return Response(notes)
     }
 
@@ -90,6 +113,7 @@ class FeedResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val notes = response.data.map { SocialMapper.toNote(it) }
+        populateLikeCounts(notes)
         return Response(notes)
     }
 
@@ -158,6 +182,32 @@ class FeedResourceImpl(
 
         // Fallback: positional (last e-tag is reply target if multiple, only e-tag is root)
         return if (eTags.size == 1) eTags[0][1] else eTags.last()[1]
+    }
+
+    /** Populate likeCount for a list of notes by fetching reactions */
+    private suspend fun populateLikeCounts(notes: List<NostrNote>) {
+        if (notes.isEmpty()) return
+
+        // Collect all event IDs
+        val eventIds = notes.map { it.event.id }
+
+        // Fetch all reactions for these notes
+        val reactionFilter = NostrFilter(
+            eTags = eventIds,
+            kinds = listOf(EventKind.REACTION),
+            limit = 1000,
+        )
+        val reactionResponse = nostr.events().queryEvents(listOf(reactionFilter))
+
+        // Group reactions by target event ID
+        val reactionsByEvent = reactionResponse.data
+            .groupBy { SocialMapper.getReactionTarget(it) ?: "" }
+
+        // Populate likeCount for each note
+        for (note in notes) {
+            val reactions = reactionsByEvent[note.event.id] ?: listOf()
+            note.likeCount = SocialMapper.countLikes(reactions)
+        }
     }
 
     override suspend fun post(content: String, tags: List<List<String>>, contentWarning: String?): Response<NostrEvent> {

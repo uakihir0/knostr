@@ -4,6 +4,7 @@ import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrProfile
 import work.socialhub.knostr.internal.InternalUtility
+import work.socialhub.knostr.social.model.NostrMedia
 import work.socialhub.knostr.social.model.NostrNote
 import work.socialhub.knostr.social.model.NostrReaction
 import work.socialhub.knostr.social.model.NostrUser
@@ -73,7 +74,53 @@ object SocialMapper {
                     }
                 }
             }
+
+            // Parse NIP-94 imeta tags into media list
+            medias = parseImetaTags(event.tags)
         }
+    }
+
+    /** Parse imeta tags (NIP-94) into NostrMedia objects */
+    private fun parseImetaTags(tags: List<List<String>>): List<NostrMedia> {
+        val mediaList = mutableListOf<NostrMedia>()
+        var currentMedia: NostrMedia? = null
+
+        for (tag in tags) {
+            if (tag.size < 3) continue
+            if (tag[0] == "imeta") {
+                // Each imeta tag is a key-value pair
+                val key = tag[1]
+                val value = tag[2]
+
+                // Start a new media when we see a url
+                if (key == "url") {
+                    currentMedia?.let { mediaList.add(it) }
+                    currentMedia = NostrMedia().apply { url = value }
+                } else {
+                    currentMedia?.let { media ->
+                        when (key) {
+                            "m" -> media.mimeType = value
+                            "x" -> media.fileName = value
+                            "dim" -> {
+                                val dims = value.split(" ")
+                                if (dims.size == 2) {
+                                    media.width = dims[0].toIntOrNull()
+                                    media.height = dims[1].toIntOrNull()
+                                }
+                            }
+                            "bh" -> media.blurhash = value
+                            "thumb" -> media.thumbnailUrl = value
+                            "image" -> media.thumbnailUrl = value
+                            "sha256" -> media.sha256 = value
+                        }
+                    }
+                }
+            }
+        }
+        // Add the last media
+        currentMedia?.let { mediaList.add(it) }
+
+        return mediaList
     }
 
     /** Map a kind:7 event to NostrReaction */
@@ -164,5 +211,20 @@ object SocialMapper {
         return event.tags
             .filter { it.size >= 2 && it[0] == "p" }
             .map { it[1] }
+    }
+
+    /** Count likes (kind:7 reactions) for a given event ID */
+    fun countLikes(reactions: List<NostrEvent>): Int {
+        return reactions.count { event ->
+            val content = event.content.trim()
+            content.isEmpty() || content == "+" || content == "❤️" || content == "❤"
+        }
+    }
+
+    /** Extract target event ID from a kind:7 reaction event */
+    fun getReactionTarget(event: NostrEvent): String? {
+        return event.tags
+            .firstOrNull { it.size >= 2 && it[0] == "e" }
+            ?.get(1)
     }
 }
