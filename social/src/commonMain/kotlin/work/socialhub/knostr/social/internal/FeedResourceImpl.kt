@@ -360,11 +360,11 @@ class FeedResourceImpl(
 
     override suspend fun getNoteByNpub(noteId: String): Response<NostrNote> {
         // Decode note1... bech32 to get event ID
-        val bytes = Bech32.decode(noteId)
-        if (bytes.hrp != "note") {
+        val (hrp, data) = Bech32.decode(noteId)
+        if (hrp != "note") {
             throw NostrException("Invalid note bech32: $noteId")
         }
-        val eventId = Hex.encode(bytes.data)
+        val eventId = Hex.encode(data)
         return getNote(eventId)
     }
 

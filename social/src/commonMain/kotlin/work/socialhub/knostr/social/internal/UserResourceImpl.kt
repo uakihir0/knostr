@@ -214,11 +214,11 @@ class UserResourceImpl(
     }
 
     override suspend fun getProfileByNpub(npub: String): Response<NostrUser> {
-        val bytes = Bech32.decode(npub)
-        if (bytes.hrp != "npub") {
+        val (hrp, data) = Bech32.decode(npub)
+        if (hrp != "npub") {
             throw NostrException("Invalid npub bech32: $npub")
         }
-        val pubkey = Hex.encode(bytes.data)
+        val pubkey = Hex.encode(data)
         return getProfile(pubkey)
     }
 
