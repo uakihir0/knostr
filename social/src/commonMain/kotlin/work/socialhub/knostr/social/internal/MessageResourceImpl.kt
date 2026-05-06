@@ -13,6 +13,7 @@ import work.socialhub.knostr.signing.NostrSigner
 import work.socialhub.knostr.signing.createSigner
 import work.socialhub.knostr.social.api.MessageResource
 import work.socialhub.knostr.social.model.NostrDirectMessage
+import work.socialhub.knostr.social.model.NostrThread
 import work.socialhub.knostr.util.Hex
 import work.socialhub.knostr.util.toBlocking
 import kotlin.time.Clock
@@ -279,6 +280,35 @@ class MessageResourceImpl(
 
     // --- Blocking variants ---
 
+    override suspend fun getThreads(since: Long?, until: Long?, limit: Int): Response<List<NostrThread>> {
+        val messages = getMessages(since, until, limit * 2).data
+
+        // Group by conversation partner (the other party in each DM)
+        val signer = nostr.signer()
+        val myPubkey = signer?.getPublicKey() ?: return Response(listOf())
+
+        val threadsByPartner = mutableMapOf<String, MutableList<NostrDirectMessage>>()
+        for (msg in messages) {
+            val partner = if (msg.senderPubkey == myPubkey) msg.recipientPubkey else msg.senderPubkey
+            threadsByPartner.getOrPut(partner) { mutableListOf() }.add(msg)
+        }
+
+        // Convert to NostrThread list, sorted by latest message
+        val threads = threadsByPartner.entries
+            .sortedByDescending { it.value.maxOfOrNull { m -> m.createdAt } ?: 0L }
+            .take(limit)
+            .map { (partner, msgs) ->
+                val sorted = msgs.sortedBy { it.createdAt }
+                NostrThread().apply {
+                    // Use the latest message as rootNote (representing the thread)
+                    rootNote = null // DMs don't map directly to notes
+                    replies = listOf()
+                }
+            }
+
+        return Response(threads)
+    }
+
     override fun sendMessageBlocking(recipientPubkey: String, content: String): Response<NostrEvent> {
         return toBlocking { sendMessage(recipientPubkey, content) }
     }
@@ -297,6 +327,10 @@ class MessageResourceImpl(
 
     override fun getLegacyMessagesBlocking(since: Long?, until: Long?, limit: Int): Response<List<NostrDirectMessage>> {
         return toBlocking { getLegacyMessages(since, until, limit) }
+    }
+
+    override fun getThreadsBlocking(since: Long?, until: Long?, limit: Int): Response<List<NostrThread>> {
+        return toBlocking { getThreads(since, until, limit) }
     }
 }
 
