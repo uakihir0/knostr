@@ -88,37 +88,48 @@ object SocialMapper {
         for (tag in tags) {
             if (tag.size < 2) continue
             if (tag[0] == "imeta") {
-                // NIP-94 imeta tags can be in two formats:
-                // 1. ["imeta", "key value"] (flattened, e.g., "url https://...")
-                // 2. ["imeta", "key", "value"] (separated)
-                val (key, value) = if (tag.size >= 3) {
-                    tag[1] to tag[2]
-                } else {
-                    val parts = tag[1].split(" ", limit = 2)
-                    if (parts.size == 2) parts[0] to parts[1] else tag[1] to ""
-                }
+                // NIP-94 imeta tags can have multiple field entries in one tag:
+                // ["imeta", "url https://...", "m image/png", "dim 200x200"]
+                // Or separated pairs: ["imeta", "url", "https://...", "m", "image/png"]
+                val entries = tag.drop(1)
+                var i = 0
+                while (i < entries.size) {
+                    val entry = entries[i]
+                    val (key, value) = if (entry.contains(" ")) {
+                        val parts = entry.split(" ", limit = 2)
+                        parts[0] to parts.getOrElse(1) { "" }
+                    } else if (i + 1 < entries.size && !entries[i + 1].contains(" ")) {
+                        // Separated key-value pair: ["url", "https://..."]
+                        val k = entry
+                        val v = entries[i + 1]
+                        i++ // skip next entry since we consumed it as value
+                        k to v
+                    } else {
+                        entry to ""
+                    }
 
-                // Start a new media when we see a url
-                if (key == "url") {
-                    currentMedia?.let { mediaList.add(it) }
-                    currentMedia = NostrMedia().apply { url = value }
-                } else {
-                    currentMedia?.let { media ->
-                        when (key) {
-                            "m" -> media.mimeType = value
-                            "x" -> media.fileName = value
-                            "dim" -> {
-                                val dims = value.split(" ")
-                                if (dims.size == 2) {
-                                    media.width = dims[0].toIntOrNull()
-                                    media.height = dims[1].toIntOrNull()
+                    if (key == "url") {
+                        currentMedia?.let { mediaList.add(it) }
+                        currentMedia = NostrMedia().apply { url = value }
+                    } else {
+                        currentMedia?.let { media ->
+                            when (key) {
+                                "m" -> media.mimeType = value
+                                "x" -> media.fileName = value
+                                "dim" -> {
+                                    val dims = value.split(" ")
+                                    if (dims.size == 2) {
+                                        media.width = dims[0].toIntOrNull()
+                                        media.height = dims[1].toIntOrNull()
+                                    }
                                 }
+                                "bh", "blurhash" -> media.blurhash = value
+                                "thumb", "image" -> media.thumbnailUrl = value
+                                "sha256" -> media.sha256 = value
                             }
-                            "bh" -> media.blurhash = value
-                            "thumb", "image" -> media.thumbnailUrl = value
-                            "sha256" -> media.sha256 = value
                         }
                     }
+                    i++
                 }
             }
         }
@@ -133,7 +144,7 @@ object SocialMapper {
         return NostrNote().apply {
             content = dm.content
             createdAt = dm.createdAt
-            noteId = ""
+            noteId = dm.id
             // Create a minimal event wrapper
             event = NostrEvent(
                 id = dm.id,

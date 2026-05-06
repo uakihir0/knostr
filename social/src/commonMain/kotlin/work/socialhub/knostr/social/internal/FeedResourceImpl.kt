@@ -55,6 +55,15 @@ class FeedResourceImpl(
     }
 
     override suspend fun getNote(eventId: String): Response<NostrNote> {
+        return getNoteInternal(eventId, visited = mutableSetOf())
+    }
+
+    private suspend fun getNoteInternal(eventId: String, visited: MutableSet<String>): Response<NostrNote> {
+        if (eventId in visited) {
+            throw NostrException("Circular quote reference detected: $eventId")
+        }
+        visited.add(eventId)
+
         val filter = NostrFilter(
             ids = listOf(eventId),
             limit = 1,
@@ -76,10 +85,10 @@ class FeedResourceImpl(
         // Resolve quoted note if q-tag present
         if (note.quotedEventId != null) {
             try {
-                val quotedResponse = getNote(note.quotedEventId!!)
+                val quotedResponse = getNoteInternal(note.quotedEventId!!, visited)
                 note.quotedNote = quotedResponse.data
             } catch (_: Exception) {
-                // Ignore if quoted note not found
+                // Ignore if quoted note not found or circular reference
             }
         }
 
