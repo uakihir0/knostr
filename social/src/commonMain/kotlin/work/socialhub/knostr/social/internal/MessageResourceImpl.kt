@@ -299,10 +299,13 @@ class MessageResourceImpl(
             .take(limit)
             .map { (partner, msgs) ->
                 val sorted = msgs.sortedBy { it.createdAt }
+                // Create synthetic notes from DMs to populate the thread
+                val notes = sorted.map { dm ->
+                    SocialMapper.toDirectMessageNote(dm)
+                }
                 NostrThread().apply {
-                    // Use the latest message as rootNote (representing the thread)
-                    rootNote = null // DMs don't map directly to notes
-                    replies = listOf()
+                    rootNote = notes.lastOrNull()
+                    replies = notes.dropLast(1)
                 }
             }
 

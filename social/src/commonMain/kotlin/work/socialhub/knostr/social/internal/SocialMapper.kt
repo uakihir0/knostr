@@ -86,11 +86,17 @@ object SocialMapper {
         var currentMedia: NostrMedia? = null
 
         for (tag in tags) {
-            if (tag.size < 3) continue
+            if (tag.size < 2) continue
             if (tag[0] == "imeta") {
-                // Each imeta tag is a key-value pair
-                val key = tag[1]
-                val value = tag[2]
+                // NIP-94 imeta tags can be in two formats:
+                // 1. ["imeta", "key value"] (flattened, e.g., "url https://...")
+                // 2. ["imeta", "key", "value"] (separated)
+                val (key, value) = if (tag.size >= 3) {
+                    tag[1] to tag[2]
+                } else {
+                    val parts = tag[1].split(" ", limit = 2)
+                    if (parts.size == 2) parts[0] to parts[1] else tag[1] to ""
+                }
 
                 // Start a new media when we see a url
                 if (key == "url") {
@@ -109,8 +115,7 @@ object SocialMapper {
                                 }
                             }
                             "bh" -> media.blurhash = value
-                            "thumb" -> media.thumbnailUrl = value
-                            "image" -> media.thumbnailUrl = value
+                            "thumb", "image" -> media.thumbnailUrl = value
                             "sha256" -> media.sha256 = value
                         }
                     }
@@ -121,6 +126,25 @@ object SocialMapper {
         currentMedia?.let { mediaList.add(it) }
 
         return mediaList
+    }
+
+    /** Create a synthetic NostrNote from a NostrDirectMessage */
+    fun toDirectMessageNote(dm: work.socialhub.knostr.social.model.NostrDirectMessage): NostrNote {
+        return NostrNote().apply {
+            content = dm.content
+            createdAt = dm.createdAt
+            noteId = ""
+            // Create a minimal event wrapper
+            event = NostrEvent(
+                id = dm.id,
+                pubkey = dm.senderPubkey,
+                createdAt = dm.createdAt,
+                kind = if (dm.isLegacy) EventKind.ENCRYPTED_DM else EventKind.GIFT_WRAP,
+                tags = listOf(listOf("p", dm.recipientPubkey)),
+                content = dm.content,
+                sig = "",
+            )
+        }
     }
 
     /** Map a kind:7 event to NostrReaction */

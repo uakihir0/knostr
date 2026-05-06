@@ -307,12 +307,16 @@ class FeedResourceImpl(
             kinds = listOf(EventKind.REACTION),
             since = since,
             until = until,
-            limit = limit * 2, // Fetch more to account for non-like reactions
+            limit = limit * 3, // Fetch more to account for non-like reactions
         )
         val reactionResponse = nostr.events().queryEvents(listOf(reactionFilter))
 
-        // Extract target event IDs from e-tags
+        // Filter only likes (empty content, "+", or heart) and extract target event IDs
         val targetEventIds = reactionResponse.data
+            .filter { event ->
+                val content = event.content.trim()
+                content.isEmpty() || content == "+" || content == "\u2764\ufe0f" || content == "\u2764"
+            }
             .mapNotNull { event ->
                 event.tags.firstOrNull { it.size >= 2 && it[0] == "e" }?.get(1)
             }
