@@ -233,9 +233,9 @@ class UserResourceImpl(
             val followingResponse = getFollowing(myPubkey)
             relationship.isFollowing = followingResponse.data.contains(pubkey)
 
-            // Check if they're following me
-            val followersResponse = getFollowers(myPubkey, limit = 1000)
-            relationship.isFollowedBy = followersResponse.data.contains(pubkey)
+            // Check if they're following me by querying their follow list
+            val theirFollowingResponse = getFollowing(pubkey)
+            relationship.isFollowedBy = theirFollowingResponse.data.contains(myPubkey)
 
             // Check if I'm muting them (kind:10000)
             val muteFilter = NostrFilter(
