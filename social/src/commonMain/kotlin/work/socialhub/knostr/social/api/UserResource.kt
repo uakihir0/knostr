@@ -3,6 +3,7 @@ package work.socialhub.knostr.social.api
 import work.socialhub.knostr.api.response.Response
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrProfile
+import work.socialhub.knostr.social.model.NostrRelationship
 import work.socialhub.knostr.social.model.NostrUser
 import work.socialhub.knostr.social.model.NostrUserStatus
 import kotlin.js.JsExport
@@ -43,6 +44,15 @@ interface UserResource {
     /** Clear user status */
     suspend fun clearStatus(type: String = "general"): Response<NostrEvent>
 
+    /** Resolve npub... bech32 to profile */
+    suspend fun getProfileByNpub(npub: String): Response<NostrUser>
+
+    /** Get relationship status (follow/mute/block) with target user */
+    suspend fun getRelationship(pubkey: String): Response<NostrRelationship>
+
+    /** Get follower profiles in batch */
+    suspend fun getFollowersWithProfiles(pubkey: String, limit: Int = 100): Response<List<NostrUser>>
+
     @JsExport.Ignore
     fun getProfileBlocking(pubkey: String): Response<NostrUser>
 
@@ -75,4 +85,13 @@ interface UserResource {
 
     @JsExport.Ignore
     fun clearStatusBlocking(type: String = "general"): Response<NostrEvent>
+
+    @JsExport.Ignore
+    fun getProfileByNpubBlocking(npub: String): Response<NostrUser>
+
+    @JsExport.Ignore
+    fun getRelationshipBlocking(pubkey: String): Response<NostrRelationship>
+
+    @JsExport.Ignore
+    fun getFollowersWithProfilesBlocking(pubkey: String, limit: Int = 100): Response<List<NostrUser>>
 }

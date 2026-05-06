@@ -10,6 +10,7 @@ import work.socialhub.knostr.entity.NostrProfile
 import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.internal.InternalUtility
 import work.socialhub.knostr.social.api.UserResource
+import work.socialhub.knostr.social.model.NostrRelationship
 import work.socialhub.knostr.social.model.NostrUser
 import work.socialhub.knostr.social.model.NostrUserStatus
 import work.socialhub.knostr.util.Bech32
@@ -212,6 +213,57 @@ class UserResourceImpl(
         return setStatus("", type)
     }
 
+    override suspend fun getProfileByNpub(npub: String): Response<NostrUser> {
+        val bytes = Bech32.decode(npub)
+        if (bytes.hrp != "npub") {
+            throw NostrException("Invalid npub bech32: $npub")
+        }
+        val pubkey = Hex.encode(bytes.data)
+        return getProfile(pubkey)
+    }
+
+    override suspend fun getRelationship(pubkey: String): Response<NostrRelationship> {
+        val signer = nostr.signer()
+        val myPubkey = signer?.getPublicKey()
+
+        val relationship = NostrRelationship()
+
+        // Check if I'm following them
+        if (myPubkey != null) {
+            val followingResponse = getFollowing(myPubkey)
+            relationship.isFollowing = followingResponse.data.contains(pubkey)
+
+            // Check if they're following me
+            val followersResponse = getFollowers(myPubkey, limit = 1000)
+            relationship.isFollowedBy = followersResponse.data.contains(pubkey)
+
+            // Check if I'm muting them (kind:10000)
+            val muteFilter = NostrFilter(
+                authors = listOf(myPubkey),
+                kinds = listOf(EventKind.MUTE_LIST),
+                limit = 1,
+            )
+            val muteResponse = nostr.events().queryEvents(listOf(muteFilter))
+            val mutedPubkeys = muteResponse.data.firstOrNull()
+                ?.let { SocialMapper.toFollowList(it) }
+                ?: listOf()
+            relationship.isMuting = mutedPubkeys.contains(pubkey)
+        }
+
+        return Response(relationship)
+    }
+
+    override suspend fun getFollowersWithProfiles(pubkey: String, limit: Int): Response<List<NostrUser>> {
+        val followersResponse = getFollowers(pubkey, limit)
+        val followerPubkeys = followersResponse.data
+
+        if (followerPubkeys.isEmpty()) {
+            return Response(listOf())
+        }
+
+        return getProfiles(followerPubkeys)
+    }
+
     private suspend fun getFollowingTags(pubkey: String): List<List<String>> {
         val filter = NostrFilter(
             authors = listOf(pubkey),
@@ -264,5 +316,17 @@ class UserResourceImpl(
 
     override fun clearStatusBlocking(type: String): Response<NostrEvent> {
         return toBlocking { clearStatus(type) }
+    }
+
+    override fun getProfileByNpubBlocking(npub: String): Response<NostrUser> {
+        return toBlocking { getProfileByNpub(npub) }
+    }
+
+    override fun getRelationshipBlocking(pubkey: String): Response<NostrRelationship> {
+        return toBlocking { getRelationship(pubkey) }
+    }
+
+    override fun getFollowersWithProfilesBlocking(pubkey: String, limit: Int): Response<List<NostrUser>> {
+        return toBlocking { getFollowersWithProfiles(pubkey, limit) }
     }
 }
