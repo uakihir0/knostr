@@ -52,7 +52,7 @@ kotlin {
     mingwX64()
 
     compilerOptions {
-        freeCompilerArgs.add("-Xenable-suspend-function-exporting")
+        freeCompilerArgs.add("-XXLanguage:+JsAllowExportingSuspendFunctions")
     }
 
     sourceSets {
