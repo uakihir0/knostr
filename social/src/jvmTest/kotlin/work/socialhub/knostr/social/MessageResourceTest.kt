@@ -173,4 +173,26 @@ class MessageResourceTest : AbstractTest() {
             disconnectRelays(nostr, scope)
         }
     }
+
+    @Test
+    fun testGetThreads() = runBlocking {
+        val social = social()
+        val nostr = social.nostr()
+        val scope = connectRelays(nostr)
+
+        try {
+            // Get DM conversation threads
+            val response = social.messages().getThreads(limit = 5)
+            val threads = response.data
+
+            println("DM threads: ${threads.size}")
+            threads.forEach { thread ->
+                println("  rootNote=${thread.rootNote?.noteId?.take(12)}...")
+                println("  replies=${thread.replies.size}")
+            }
+            assertNotNull(threads)
+        } finally {
+            disconnectRelays(nostr, scope)
+        }
+    }
 }
