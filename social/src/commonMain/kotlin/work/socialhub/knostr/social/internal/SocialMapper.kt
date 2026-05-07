@@ -259,7 +259,7 @@ object SocialMapper {
     /** Extract target event ID from a kind:7 reaction event */
     fun getReactionTarget(event: NostrEvent): String? {
         return event.tags
-            .firstOrNull { it.size >= 2 && it[0] == "e" }
+            .lastOrNull { it.size >= 2 && it[0] == "e" }
             ?.get(1)
     }
 }

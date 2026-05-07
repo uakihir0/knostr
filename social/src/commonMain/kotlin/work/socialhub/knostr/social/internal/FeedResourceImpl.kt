@@ -200,11 +200,13 @@ class FeedResourceImpl(
         // Collect all event IDs
         val eventIds = notes.map { it.event.id }
 
-        // Fetch all reactions for these notes
+        // Fetch reactions with a limit proportional to note count
+        // (cap at 5000 to avoid overwhelming relays)
+        val reactionLimit = minOf(eventIds.size * 200, 5000)
         val reactionFilter = NostrFilter(
             eTags = eventIds,
             kinds = listOf(EventKind.REACTION),
-            limit = 1000,
+            limit = reactionLimit,
         )
         val reactionResponse = nostr.events().queryEvents(listOf(reactionFilter))
 
@@ -327,7 +329,7 @@ class FeedResourceImpl(
                 content.isEmpty() || content == "+" || content == "\u2764\ufe0f" || content == "\u2764"
             }
             .mapNotNull { event ->
-                event.tags.firstOrNull { it.size >= 2 && it[0] == "e" }?.get(1)
+                event.tags.lastOrNull { it.size >= 2 && it[0] == "e" }?.get(1)
             }
             .distinct()
             .take(limit)
