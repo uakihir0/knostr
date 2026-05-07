@@ -281,14 +281,21 @@ class MessageResourceImpl(
     // --- Blocking variants ---
 
     override suspend fun getThreads(since: Long?, until: Long?, limit: Int): Response<List<NostrThread>> {
-        val messages = getMessages(since, until, limit * 2).data
+        // Fetch both NIP-17 gift-wrap DMs and NIP-04 legacy DMs
+        val giftWrapMessages = getMessages(since, until, limit * 2).data
+        val legacyMessages = getLegacyMessages(since, until, limit * 2).data
+
+        // Combine and deduplicate by message ID
+        val allMessages = (giftWrapMessages + legacyMessages)
+            .distinctBy { it.id }
+            .sortedByDescending { it.createdAt }
 
         // Group by conversation partner (the other party in each DM)
         val signer = nostr.signer()
         val myPubkey = signer?.getPublicKey() ?: return Response(listOf())
 
         val threadsByPartner = mutableMapOf<String, MutableList<NostrDirectMessage>>()
-        for (msg in messages) {
+        for (msg in allMessages) {
             val partner = if (msg.senderPubkey == myPubkey) msg.recipientPubkey else msg.senderPubkey
             threadsByPartner.getOrPut(partner) { mutableListOf() }.add(msg)
         }
@@ -297,7 +304,7 @@ class MessageResourceImpl(
         val threads = threadsByPartner.entries
             .sortedByDescending { it.value.maxOfOrNull { m -> m.createdAt } ?: 0L }
             .take(limit)
-            .map { (partner, msgs) ->
+            .map { (_, msgs) ->
                 val sorted = msgs.sortedBy { it.createdAt }
                 // Create synthetic notes from DMs to populate the thread
                 val notes = sorted.map { dm ->

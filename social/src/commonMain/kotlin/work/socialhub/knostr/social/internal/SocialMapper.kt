@@ -144,7 +144,7 @@ object SocialMapper {
         return NostrNote().apply {
             content = dm.content
             createdAt = dm.createdAt
-            noteId = dm.id
+            noteId = Bech32.encode("note", Hex.decode(dm.id))
             // Create a minimal event wrapper
             event = NostrEvent(
                 id = dm.id,
