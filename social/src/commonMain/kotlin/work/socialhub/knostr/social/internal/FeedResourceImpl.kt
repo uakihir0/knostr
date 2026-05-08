@@ -19,7 +19,7 @@ class FeedResourceImpl(
     private val nostr: Nostr,
 ) : FeedResource {
 
-    override suspend fun getHomeFeed(since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
+    override suspend fun getHomeFeed(since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get home feed")
 
@@ -48,8 +48,13 @@ class FeedResourceImpl(
             limit = limit,
         )
         val feedResponse = nostr.events().queryEvents(listOf(feedFilter))
-        val notes = feedResponse.data.map { SocialMapper.toNote(it) }
-        populateLikeCounts(notes)
+        var notes = feedResponse.data.map { SocialMapper.toNote(it) }
+        if (excludeSensitive) {
+            notes = notes.filterNot { it.isSensitive }
+        }
+        if (notes.isNotEmpty()) {
+            populateLikeCounts(notes)
+        }
 
         return Response(notes)
     }
@@ -95,7 +100,7 @@ class FeedResourceImpl(
         return Response(note)
     }
 
-    override suspend fun getUserFeed(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
+    override suspend fun getUserFeed(pubkey: String, since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
         val filter = NostrFilter(
             authors = listOf(pubkey),
             kinds = listOf(EventKind.TEXT_NOTE),
@@ -104,25 +109,35 @@ class FeedResourceImpl(
             limit = limit,
         )
         val response = nostr.events().queryEvents(listOf(filter))
-        val notes = response.data.map { SocialMapper.toNote(it) }
-        populateLikeCounts(notes)
+        var notes = response.data.map { SocialMapper.toNote(it) }
+        if (excludeSensitive) {
+            notes = notes.filterNot { it.isSensitive }
+        }
+        if (notes.isNotEmpty()) {
+            populateLikeCounts(notes)
+        }
         return Response(notes)
     }
 
-    override suspend fun getMentions(since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
+override suspend fun getMentions(since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get mentions")
 
         val filter = NostrFilter(
-            pTags = listOf(signer.getPublicKey()),
+            authors = listOf(signer.getPublicKey()),
             kinds = listOf(EventKind.TEXT_NOTE),
             since = since,
             until = until,
             limit = limit,
         )
         val response = nostr.events().queryEvents(listOf(filter))
-        val notes = response.data.map { SocialMapper.toNote(it) }
-        populateLikeCounts(notes)
+        var notes = response.data.map { SocialMapper.toNote(it) }
+        if (excludeSensitive) {
+            notes = notes.filterNot { it.isSensitive }
+        }
+        if (notes.isNotEmpty()) {
+            populateLikeCounts(notes)
+        }
         return Response(notes)
     }
 
@@ -329,7 +344,7 @@ class FeedResourceImpl(
         return nostr.events().deleteEvent(eventId, reason)
     }
 
-    override suspend fun getUserLikesFeed(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
+    override suspend fun getUserLikesFeed(pubkey: String, since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
         // Query kind:7 (reaction) events by the user
         val reactionFilter = NostrFilter(
             authors = listOf(pubkey),
@@ -363,12 +378,15 @@ class FeedResourceImpl(
             limit = targetEventIds.size,
         )
         val noteResponse = nostr.events().queryEvents(listOf(noteFilter))
-        val notes = noteResponse.data.map { SocialMapper.toNote(it) }
+        var notes = noteResponse.data.map { SocialMapper.toNote(it) }
+        if (excludeSensitive) {
+            notes = notes.filterNot { it.isSensitive }
+        }
 
         return Response(notes)
     }
 
-    override suspend fun getUserMediaFeed(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
+    override suspend fun getUserMediaFeed(pubkey: String, since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
         // Query kind:1 events by the user
         val filter = NostrFilter(
             authors = listOf(pubkey),
@@ -380,13 +398,17 @@ class FeedResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
 
         // Filter for notes with imeta tags (NIP-94) or image URLs in content
-        val mediaNotes = response.data
+        var mediaNotes = response.data
             .filter { event ->
                 event.tags.any { it.size >= 2 && it[0] == "imeta" } ||
                     event.content.contains(Regex("https?://\\S+\\.(jpg|jpeg|png|gif|webp|mp4|webm)", RegexOption.IGNORE_CASE))
             }
             .take(limit)
             .map { SocialMapper.toNote(it) }
+
+        if (excludeSensitive) {
+            mediaNotes = mediaNotes.filterNot { it.isSensitive }
+        }
 
         return Response(mediaNotes)
     }
@@ -401,20 +423,20 @@ class FeedResourceImpl(
         return getNote(eventId)
     }
 
-    override fun getHomeFeedBlocking(since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
-        return toBlocking { getHomeFeed(since, until, limit) }
+    override fun getHomeFeedBlocking(since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
+        return toBlocking { getHomeFeed(since, until, limit, excludeSensitive) }
     }
 
     override fun getNoteBlocking(eventId: String): Response<NostrNote> {
         return toBlocking { getNote(eventId) }
     }
 
-    override fun getUserFeedBlocking(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
-        return toBlocking { getUserFeed(pubkey, since, until, limit) }
+    override fun getUserFeedBlocking(pubkey: String, since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
+        return toBlocking { getUserFeed(pubkey, since, until, limit, excludeSensitive) }
     }
 
-    override fun getMentionsBlocking(since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
-        return toBlocking { getMentions(since, until, limit) }
+    override fun getMentionsBlocking(since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
+        return toBlocking { getMentions(since, until, limit, excludeSensitive) }
     }
 
     override fun getThreadBlocking(eventId: String): Response<NostrThread> {
@@ -441,12 +463,12 @@ class FeedResourceImpl(
         return toBlocking { delete(eventId, reason) }
     }
 
-    override fun getUserLikesFeedBlocking(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
-        return toBlocking { getUserLikesFeed(pubkey, since, until, limit) }
+    override fun getUserLikesFeedBlocking(pubkey: String, since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
+        return toBlocking { getUserLikesFeed(pubkey, since, until, limit, excludeSensitive) }
     }
 
-    override fun getUserMediaFeedBlocking(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
-        return toBlocking { getUserMediaFeed(pubkey, since, until, limit) }
+    override fun getUserMediaFeedBlocking(pubkey: String, since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
+        return toBlocking { getUserMediaFeed(pubkey, since, until, limit, excludeSensitive) }
     }
 
     override fun getNoteByNpubBlocking(noteId: String): Response<NostrNote> {
