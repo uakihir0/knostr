@@ -28,4 +28,8 @@ class NostrNote {
     var quotedNote: NostrNote? = null
     /** Media attachments (parsed from imeta/NIP-94 tags) */
     var medias: List<NostrMedia> = listOf()
+    /** NIP-40: event expiry timestamp (null if no expiry) */
+    var expiry: Long? = null
+    /** NIP-36: whether this event is marked as sensitive */
+    var isSensitive: Boolean = false
 }
