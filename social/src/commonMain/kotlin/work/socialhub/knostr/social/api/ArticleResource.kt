@@ -17,6 +17,8 @@ interface ArticleResource {
         image: String? = null,
         hashtags: List<String> = listOf(),
         publishedAt: Long? = null,
+        expiry: Long? = null,
+        sensitive: Boolean = false,
     ): Response<NostrEvent>
 
     /** Get an article by author pubkey and d-tag identifier */
@@ -37,6 +39,8 @@ interface ArticleResource {
         image: String? = null,
         hashtags: List<String> = listOf(),
         publishedAt: Long? = null,
+        expiry: Long? = null,
+        sensitive: Boolean = false,
     ): Response<NostrEvent>
 
     @JsExport.Ignore
