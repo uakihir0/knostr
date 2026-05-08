@@ -45,7 +45,7 @@ class ArticleResourceImpl(
             tags.add(listOf("t", hashtag.lowercase()))
         }
         if (expiry != null) {
-            tags.add(listOf("X", expiry.toString()))
+            tags.add(listOf("expiration", expiry.toString()))
         }
         if (sensitive) {
             tags.add(listOf("sensitive"))
@@ -131,7 +131,7 @@ class ArticleResourceImpl(
         article.hashtags = hashtags
 
         article.expiry = event.tags
-            .firstOrNull { it.size >= 2 && it[0] == "X" }
+            .firstOrNull { it.size >= 2 && it[0] == "expiration" }
             ?.get(1)
             ?.toLongOrNull()
         article.isSensitive = event.tags.any { it.size >= 1 && it[0] == "sensitive" }

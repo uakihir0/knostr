@@ -54,7 +54,7 @@ object SocialMapper {
 
             // NIP-40: expiry
             expiry = event.tags
-                .firstOrNull { it.size >= 2 && it[0] == "X" }
+                .firstOrNull { it.size >= 2 && it[0] == "expiration" }
                 ?.get(1)
                 ?.toLongOrNull()
 

@@ -124,7 +124,7 @@ override suspend fun getMentions(since: Long?, until: Long?, limit: Int, exclude
             ?: throw NostrException("Signer is required to get mentions")
 
         val filter = NostrFilter(
-            authors = listOf(signer.getPublicKey()),
+            pTags = listOf(signer.getPublicKey()),
             kinds = listOf(EventKind.TEXT_NOTE),
             since = since,
             until = until,
@@ -245,7 +245,7 @@ override suspend fun getMentions(since: Long?, until: Long?, limit: Int, exclude
             allTags.add(listOf("content-warning", contentWarning))
         }
         if (expiry != null) {
-            allTags.add(listOf("X", expiry.toString()))
+            allTags.add(listOf("expiration", expiry.toString()))
         }
         if (sensitive) {
             allTags.add(listOf("sensitive"))
@@ -278,7 +278,7 @@ override suspend fun getMentions(since: Long?, until: Long?, limit: Int, exclude
             tags.add(listOf("content-warning", contentWarning))
         }
         if (expiry != null) {
-            tags.add(listOf("X", expiry.toString()))
+            tags.add(listOf("expiration", expiry.toString()))
         }
         if (sensitive) {
             tags.add(listOf("sensitive"))
@@ -322,7 +322,7 @@ override suspend fun getMentions(since: Long?, until: Long?, limit: Int, exclude
             tags.add(listOf("content-warning", contentWarning))
         }
         if (expiry != null) {
-            tags.add(listOf("X", expiry.toString()))
+            tags.add(listOf("expiration", expiry.toString()))
         }
         if (sensitive) {
             tags.add(listOf("sensitive"))

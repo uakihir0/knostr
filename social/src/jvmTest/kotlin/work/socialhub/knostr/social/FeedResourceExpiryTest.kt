@@ -24,13 +24,13 @@ class FeedResourceExpiryTest : AbstractTest() {
             val event = response.data
 
             println("Posted event with expiry: ${event.id}")
-            println("  X tag: ${event.tags.find { it.size >= 2 && it[0] == "X" }?.get(1)}")
+            println("  expiration tag: ${event.tags.find { it.size >= 2 && it[0] == "expiration" }?.get(1)}")
 
             assertNotNull(event.id)
             assertTrue(event.kind == 1)
-            val xTag = event.tags.find { it.size >= 2 && it[0] == "X" }
-            assertNotNull(xTag, "Event should have X tag for expiry")
-            assertTrue(xTag[1] == futureTime.toString())
+            val expirationTag = event.tags.find { it.size >= 2 && it[0] == "expiration" }
+            assertNotNull(expirationTag, "Event should have expiration tag")
+            assertTrue(expirationTag[1] == futureTime.toString())
         } finally {
             disconnectRelays(nostr, scope)
         }
@@ -50,8 +50,8 @@ class FeedResourceExpiryTest : AbstractTest() {
 
             assertNotNull(event.id)
             assertTrue(event.kind == 1)
-            val xTag = event.tags.find { it.size >= 2 && it[0] == "X" }
-            assertNull(xTag, "Event should not have X tag when expiry is null")
+            val expirationTag = event.tags.find { it.size >= 2 && it[0] == "expiration" }
+            assertNull(expirationTag, "Event should not have expiration tag when expiry is null")
         } finally {
             disconnectRelays(nostr, scope)
         }
@@ -77,9 +77,9 @@ class FeedResourceExpiryTest : AbstractTest() {
 
             println("Reply with expiry: ${replyEvent.id}")
 
-            val xTag = replyEvent.tags.find { it.size >= 2 && it[0] == "X" }
-            assertNotNull(xTag, "Reply should have X tag")
-            assertTrue(xTag[1] == futureTime.toString())
+            val expirationTag = replyEvent.tags.find { it.size >= 2 && it[0] == "expiration" }
+            assertNotNull(expirationTag, "Reply should have expiration tag")
+            assertTrue(expirationTag[1] == futureTime.toString())
         } finally {
             disconnectRelays(nostr, scope)
         }
@@ -105,9 +105,9 @@ class FeedResourceExpiryTest : AbstractTest() {
 
             println("Quote repost with expiry: ${quoteEvent.id}")
 
-            val xTag = quoteEvent.tags.find { it.size >= 2 && it[0] == "X" }
-            assertNotNull(xTag, "Quote repost should have X tag")
-            assertTrue(xTag[1] == futureTime.toString())
+            val expirationTag = quoteEvent.tags.find { it.size >= 2 && it[0] == "expiration" }
+            assertNotNull(expirationTag, "Quote repost should have expiration tag")
+            assertTrue(expirationTag[1] == futureTime.toString())
         } finally {
             disconnectRelays(nostr, scope)
         }

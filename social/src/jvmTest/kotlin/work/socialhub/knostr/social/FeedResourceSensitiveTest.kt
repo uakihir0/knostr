@@ -151,11 +151,11 @@ class FeedResourceSensitiveTest : AbstractTest() {
 
             println("Posted event with both expiry and sensitive: ${event.id}")
 
-            val xTag = event.tags.find { it.size >= 2 && it[0] == "X" }
+            val expirationTag = event.tags.find { it.size >= 2 && it[0] == "expiration" }
             val sensitiveTags = event.tags.filter { it.size >= 1 && it[0] == "sensitive" }
 
-            assertNotNull(xTag, "Event should have X tag")
-            assertTrue(xTag[1] == futureTime.toString())
+            assertNotNull(expirationTag, "Event should have expiration tag")
+            assertTrue(expirationTag[1] == futureTime.toString())
             assertTrue(sensitiveTags.isNotEmpty(), "Event should have sensitive tag")
         } finally {
             disconnectRelays(nostr, scope)
