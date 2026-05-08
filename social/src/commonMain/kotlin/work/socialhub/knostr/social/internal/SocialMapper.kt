@@ -4,6 +4,7 @@ import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrProfile
 import work.socialhub.knostr.internal.InternalUtility
+import work.socialhub.knostr.social.model.NostrMedia
 import work.socialhub.knostr.social.model.NostrNote
 import work.socialhub.knostr.social.model.NostrReaction
 import work.socialhub.knostr.social.model.NostrUser
@@ -73,6 +74,87 @@ object SocialMapper {
                     }
                 }
             }
+
+            // Parse NIP-94 imeta tags into media list
+            medias = parseImetaTags(event.tags)
+        }
+    }
+
+    /** Parse imeta tags (NIP-94) into NostrMedia objects */
+    private fun parseImetaTags(tags: List<List<String>>): List<NostrMedia> {
+        val mediaList = mutableListOf<NostrMedia>()
+        var currentMedia: NostrMedia? = null
+
+        for (tag in tags) {
+            if (tag.size < 2) continue
+            if (tag[0] == "imeta") {
+                // NIP-94 imeta tags can have multiple field entries in one tag:
+                // ["imeta", "url https://...", "m image/png", "dim 200x200"]
+                // Or separated pairs: ["imeta", "url", "https://...", "m", "image/png"]
+                val entries = tag.drop(1)
+                var i = 0
+                while (i < entries.size) {
+                    val entry = entries[i]
+                    val (key, value) = if (entry.contains(" ")) {
+                        val parts = entry.split(" ", limit = 2)
+                        parts[0] to parts.getOrElse(1) { "" }
+                    } else if (i + 1 < entries.size && !entries[i + 1].contains(" ")) {
+                        // Separated key-value pair: ["url", "https://..."]
+                        val k = entry
+                        val v = entries[i + 1]
+                        i++ // skip next entry since we consumed it as value
+                        k to v
+                    } else {
+                        entry to ""
+                    }
+
+                    if (key == "url") {
+                        currentMedia?.let { mediaList.add(it) }
+                        currentMedia = NostrMedia().apply { url = value }
+                    } else {
+                        currentMedia?.let { media ->
+                            when (key) {
+                                "m" -> media.mimeType = value
+                                "x" -> media.sha256 = value
+                                "dim" -> {
+                                    val dims = value.split("x")
+                                    if (dims.size == 2) {
+                                        media.width = dims[0].toIntOrNull()
+                                        media.height = dims[1].toIntOrNull()
+                                    }
+                                }
+                                "bh", "blurhash" -> media.blurhash = value
+                                "thumb", "image" -> media.thumbnailUrl = value
+                                "sha256" -> media.sha256 = value
+                            }
+                        }
+                    }
+                    i++
+                }
+            }
+        }
+        // Add the last media
+        currentMedia?.let { mediaList.add(it) }
+
+        return mediaList
+    }
+
+    /** Create a synthetic NostrNote from a NostrDirectMessage */
+    fun toDirectMessageNote(dm: work.socialhub.knostr.social.model.NostrDirectMessage): NostrNote {
+        return NostrNote().apply {
+            content = dm.content
+            createdAt = dm.createdAt
+            noteId = Bech32.encode("note", Hex.decode(dm.id))
+            // Create a minimal event wrapper
+            event = NostrEvent(
+                id = dm.id,
+                pubkey = dm.senderPubkey,
+                createdAt = dm.createdAt,
+                kind = if (dm.isLegacy) EventKind.ENCRYPTED_DM else EventKind.GIFT_WRAP,
+                tags = listOf(listOf("p", dm.recipientPubkey)),
+                content = dm.content,
+                sig = "",
+            )
         }
     }
 
@@ -164,5 +246,20 @@ object SocialMapper {
         return event.tags
             .filter { it.size >= 2 && it[0] == "p" }
             .map { it[1] }
+    }
+
+    /** Count likes (kind:7 reactions) for a given event ID */
+    fun countLikes(reactions: List<NostrEvent>): Int {
+        return reactions.count { event ->
+            val content = event.content.trim()
+            content.isEmpty() || content == "+" || content == "❤️" || content == "❤"
+        }
+    }
+
+    /** Extract target event ID from a kind:7 reaction event */
+    fun getReactionTarget(event: NostrEvent): String? {
+        return event.tags
+            .lastOrNull { it.size >= 2 && it[0] == "e" }
+            ?.get(1)
     }
 }

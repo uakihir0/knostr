@@ -3,6 +3,7 @@ package work.socialhub.knostr.social.api
 import work.socialhub.knostr.api.response.Response
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.social.model.NostrDirectMessage
+import work.socialhub.knostr.social.model.NostrThread
 import kotlin.js.JsExport
 
 @JsExport
@@ -23,6 +24,9 @@ interface MessageResource {
     /** NIP-04 (legacy): Get received legacy DMs */
     suspend fun getLegacyMessages(since: Long? = null, until: Long? = null, limit: Int = 50): Response<List<NostrDirectMessage>>
 
+    /** Get list of DM conversation threads (grouped by sender) */
+    suspend fun getThreads(since: Long? = null, until: Long? = null, limit: Int = 50): Response<List<NostrThread>>
+
     @JsExport.Ignore
     fun sendMessageBlocking(recipientPubkey: String, content: String): Response<NostrEvent>
 
@@ -37,4 +41,7 @@ interface MessageResource {
 
     @JsExport.Ignore
     fun getLegacyMessagesBlocking(since: Long? = null, until: Long? = null, limit: Int = 50): Response<List<NostrDirectMessage>>
+
+    @JsExport.Ignore
+    fun getThreadsBlocking(since: Long? = null, until: Long? = null, limit: Int = 50): Response<List<NostrThread>>
 }

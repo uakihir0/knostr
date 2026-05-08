@@ -22,4 +22,10 @@ class NostrNote {
     var contentWarning: String? = null
     /** NIP-18: quoted event ID (q tag) */
     var quotedEventId: String? = null
+    /** Number of likes (kind:7 reactions) */
+    var likeCount: Int = 0
+    /** Resolved quoted note content (from q-tag) */
+    var quotedNote: NostrNote? = null
+    /** Media attachments (parsed from imeta/NIP-94 tags) */
+    var medias: List<NostrMedia> = listOf()
 }

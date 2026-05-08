@@ -10,6 +10,8 @@ import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.social.api.FeedResource
 import work.socialhub.knostr.social.model.NostrNote
 import work.socialhub.knostr.social.model.NostrThread
+import work.socialhub.knostr.util.Bech32
+import work.socialhub.knostr.util.Hex
 import work.socialhub.knostr.util.toBlocking
 import kotlin.time.Clock
 
@@ -47,11 +49,21 @@ class FeedResourceImpl(
         )
         val feedResponse = nostr.events().queryEvents(listOf(feedFilter))
         val notes = feedResponse.data.map { SocialMapper.toNote(it) }
+        populateLikeCounts(notes)
 
         return Response(notes)
     }
 
     override suspend fun getNote(eventId: String): Response<NostrNote> {
+        return getNoteInternal(eventId, visited = mutableSetOf())
+    }
+
+    private suspend fun getNoteInternal(eventId: String, visited: MutableSet<String>): Response<NostrNote> {
+        if (eventId in visited) {
+            throw NostrException("Circular quote reference detected: $eventId")
+        }
+        visited.add(eventId)
+
         val filter = NostrFilter(
             ids = listOf(eventId),
             limit = 1,
@@ -59,7 +71,28 @@ class FeedResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
         val event = response.data.firstOrNull()
             ?: throw NostrException("Note not found: $eventId")
-        return Response(SocialMapper.toNote(event))
+        val note = SocialMapper.toNote(event)
+
+        // Fetch reactions to populate likeCount
+        val reactionFilter = NostrFilter(
+            eTags = listOf(eventId),
+            kinds = listOf(EventKind.REACTION),
+            limit = 1000,
+        )
+        val reactionResponse = nostr.events().queryEvents(listOf(reactionFilter))
+        note.likeCount = SocialMapper.countLikes(reactionResponse.data)
+
+        // Resolve quoted note if q-tag present
+        if (note.quotedEventId != null) {
+            try {
+                val quotedResponse = getNoteInternal(note.quotedEventId!!, visited)
+                note.quotedNote = quotedResponse.data
+            } catch (_: Exception) {
+                // Ignore if quoted note not found or circular reference
+            }
+        }
+
+        return Response(note)
     }
 
     override suspend fun getUserFeed(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
@@ -72,6 +105,7 @@ class FeedResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val notes = response.data.map { SocialMapper.toNote(it) }
+        populateLikeCounts(notes)
         return Response(notes)
     }
 
@@ -88,6 +122,7 @@ class FeedResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val notes = response.data.map { SocialMapper.toNote(it) }
+        populateLikeCounts(notes)
         return Response(notes)
     }
 
@@ -156,6 +191,34 @@ class FeedResourceImpl(
 
         // Fallback: positional (last e-tag is reply target if multiple, only e-tag is root)
         return if (eTags.size == 1) eTags[0][1] else eTags.last()[1]
+    }
+
+    /** Populate likeCount for a list of notes by fetching reactions */
+    private suspend fun populateLikeCounts(notes: List<NostrNote>) {
+        if (notes.isEmpty()) return
+
+        // Collect all event IDs
+        val eventIds = notes.map { it.event.id }
+
+        // Fetch reactions with a limit proportional to note count
+        // (cap at 5000 to avoid overwhelming relays)
+        val reactionLimit = minOf(eventIds.size * 200, 5000)
+        val reactionFilter = NostrFilter(
+            eTags = eventIds,
+            kinds = listOf(EventKind.REACTION),
+            limit = reactionLimit,
+        )
+        val reactionResponse = nostr.events().queryEvents(listOf(reactionFilter))
+
+        // Group reactions by target event ID
+        val reactionsByEvent = reactionResponse.data
+            .groupBy { SocialMapper.getReactionTarget(it) ?: "" }
+
+        // Populate likeCount for each note
+        for (note in notes) {
+            val reactions = reactionsByEvent[note.event.id] ?: listOf()
+            note.likeCount = SocialMapper.countLikes(reactions)
+        }
     }
 
     override suspend fun post(content: String, tags: List<List<String>>, contentWarning: String?): Response<NostrEvent> {
@@ -248,6 +311,78 @@ class FeedResourceImpl(
         return nostr.events().deleteEvent(eventId, reason)
     }
 
+    override suspend fun getUserLikesFeed(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
+        // Query kind:7 (reaction) events by the user
+        val reactionFilter = NostrFilter(
+            authors = listOf(pubkey),
+            kinds = listOf(EventKind.REACTION),
+            since = since,
+            until = until,
+            limit = limit * 3, // Fetch more to account for non-like reactions
+        )
+        val reactionResponse = nostr.events().queryEvents(listOf(reactionFilter))
+
+        // Filter only likes (empty content, "+", or heart) and extract target event IDs
+        val targetEventIds = reactionResponse.data
+            .filter { event ->
+                val content = event.content.trim()
+                content.isEmpty() || content == "+" || content == "\u2764\ufe0f" || content == "\u2764"
+            }
+            .mapNotNull { event ->
+                event.tags.lastOrNull { it.size >= 2 && it[0] == "e" }?.get(1)
+            }
+            .distinct()
+            .take(limit)
+
+        if (targetEventIds.isEmpty()) {
+            return Response(listOf())
+        }
+
+        // Fetch the actual notes
+        val noteFilter = NostrFilter(
+            ids = targetEventIds,
+            kinds = listOf(EventKind.TEXT_NOTE),
+            limit = targetEventIds.size,
+        )
+        val noteResponse = nostr.events().queryEvents(listOf(noteFilter))
+        val notes = noteResponse.data.map { SocialMapper.toNote(it) }
+
+        return Response(notes)
+    }
+
+    override suspend fun getUserMediaFeed(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
+        // Query kind:1 events by the user
+        val filter = NostrFilter(
+            authors = listOf(pubkey),
+            kinds = listOf(EventKind.TEXT_NOTE),
+            since = since,
+            until = until,
+            limit = limit * 2, // Fetch more to filter for media
+        )
+        val response = nostr.events().queryEvents(listOf(filter))
+
+        // Filter for notes with imeta tags (NIP-94) or image URLs in content
+        val mediaNotes = response.data
+            .filter { event ->
+                event.tags.any { it.size >= 2 && it[0] == "imeta" } ||
+                    event.content.contains(Regex("https?://\\S+\\.(jpg|jpeg|png|gif|webp|mp4|webm)", RegexOption.IGNORE_CASE))
+            }
+            .take(limit)
+            .map { SocialMapper.toNote(it) }
+
+        return Response(mediaNotes)
+    }
+
+    override suspend fun getNoteByNpub(noteId: String): Response<NostrNote> {
+        // Decode note1... bech32 to get event ID
+        val (hrp, data) = Bech32.decode(noteId)
+        if (hrp != "note") {
+            throw NostrException("Invalid note bech32: $noteId")
+        }
+        val eventId = Hex.encode(data)
+        return getNote(eventId)
+    }
+
     override fun getHomeFeedBlocking(since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
         return toBlocking { getHomeFeed(since, until, limit) }
     }
@@ -286,5 +421,17 @@ class FeedResourceImpl(
 
     override fun deleteBlocking(eventId: String, reason: String): Response<Boolean> {
         return toBlocking { delete(eventId, reason) }
+    }
+
+    override fun getUserLikesFeedBlocking(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
+        return toBlocking { getUserLikesFeed(pubkey, since, until, limit) }
+    }
+
+    override fun getUserMediaFeedBlocking(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrNote>> {
+        return toBlocking { getUserMediaFeed(pubkey, since, until, limit) }
+    }
+
+    override fun getNoteByNpubBlocking(noteId: String): Response<NostrNote> {
+        return toBlocking { getNoteByNpub(noteId) }
     }
 }

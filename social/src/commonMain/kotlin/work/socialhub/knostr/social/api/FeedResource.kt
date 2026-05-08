@@ -39,6 +39,15 @@ interface FeedResource {
     /** Delete a note (kind:5) */
     suspend fun delete(eventId: String, reason: String = ""): Response<Boolean>
 
+    /** Get posts that the user has liked (via kind:7 reaction lookup) */
+    suspend fun getUserLikesFeed(pubkey: String, since: Long? = null, until: Long? = null, limit: Int = 50): Response<List<NostrNote>>
+
+    /** Get posts with media attachments (via imeta tag filter) */
+    suspend fun getUserMediaFeed(pubkey: String, since: Long? = null, until: Long? = null, limit: Int = 50): Response<List<NostrNote>>
+
+    /** Resolve note1... bech32 to event */
+    suspend fun getNoteByNpub(noteId: String): Response<NostrNote>
+
     @JsExport.Ignore
     fun getHomeFeedBlocking(since: Long? = null, until: Long? = null, limit: Int = 50): Response<List<NostrNote>>
 
@@ -68,4 +77,13 @@ interface FeedResource {
 
     @JsExport.Ignore
     fun deleteBlocking(eventId: String, reason: String = ""): Response<Boolean>
+
+    @JsExport.Ignore
+    fun getUserLikesFeedBlocking(pubkey: String, since: Long? = null, until: Long? = null, limit: Int = 50): Response<List<NostrNote>>
+
+    @JsExport.Ignore
+    fun getUserMediaFeedBlocking(pubkey: String, since: Long? = null, until: Long? = null, limit: Int = 50): Response<List<NostrNote>>
+
+    @JsExport.Ignore
+    fun getNoteByNpubBlocking(noteId: String): Response<NostrNote>
 }

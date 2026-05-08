@@ -17,4 +17,6 @@ class NostrUser {
     var followingCount: Int = 0
     var followersCount: Int = 0
     var isFollowing: Boolean = false
+    var isFollowedBy: Boolean = false
+    var isMuted: Boolean = false
 }
