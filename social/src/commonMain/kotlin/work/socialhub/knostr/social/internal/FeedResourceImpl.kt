@@ -119,7 +119,7 @@ class FeedResourceImpl(
         return Response(notes)
     }
 
-override suspend fun getMentions(since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
+    override suspend fun getMentions(since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get mentions")
 
