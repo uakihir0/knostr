@@ -25,16 +25,35 @@ interface FeedResource {
     suspend fun getThread(eventId: String): Response<NostrThread>
 
     /** Post a new text note (kind:1) */
-    suspend fun post(content: String, tags: List<List<String>> = listOf(), contentWarning: String? = null): Response<NostrEvent>
+    suspend fun post(
+        content: String,
+        tags: List<List<String>> = listOf(),
+        contentWarning: String? = null,
+        expiry: Long? = null,
+        sensitive: Boolean = false,
+    ): Response<NostrEvent>
 
     /** Reply to a note (NIP-10 threading) */
-    suspend fun reply(content: String, replyToEventId: String, rootEventId: String? = null, contentWarning: String? = null): Response<NostrEvent>
+    suspend fun reply(
+        content: String,
+        replyToEventId: String,
+        rootEventId: String? = null,
+        contentWarning: String? = null,
+        expiry: Long? = null,
+        sensitive: Boolean = false,
+    ): Response<NostrEvent>
 
     /** Repost a note (kind:6) */
     suspend fun repost(eventId: String): Response<NostrEvent>
 
     /** Quote repost a note (kind:1 with q tag, NIP-18) */
-    suspend fun quoteRepost(eventId: String, comment: String, contentWarning: String? = null): Response<NostrEvent>
+    suspend fun quoteRepost(
+        eventId: String,
+        comment: String,
+        contentWarning: String? = null,
+        expiry: Long? = null,
+        sensitive: Boolean = false,
+    ): Response<NostrEvent>
 
     /** Delete a note (kind:5) */
     suspend fun delete(eventId: String, reason: String = ""): Response<Boolean>
@@ -64,16 +83,35 @@ interface FeedResource {
     fun getThreadBlocking(eventId: String): Response<NostrThread>
 
     @JsExport.Ignore
-    fun postBlocking(content: String, tags: List<List<String>> = listOf(), contentWarning: String? = null): Response<NostrEvent>
+    fun postBlocking(
+        content: String,
+        tags: List<List<String>> = listOf(),
+        contentWarning: String? = null,
+        expiry: Long? = null,
+        sensitive: Boolean = false,
+    ): Response<NostrEvent>
 
     @JsExport.Ignore
-    fun replyBlocking(content: String, replyToEventId: String, rootEventId: String? = null, contentWarning: String? = null): Response<NostrEvent>
+    fun replyBlocking(
+        content: String,
+        replyToEventId: String,
+        rootEventId: String? = null,
+        contentWarning: String? = null,
+        expiry: Long? = null,
+        sensitive: Boolean = false,
+    ): Response<NostrEvent>
 
     @JsExport.Ignore
     fun repostBlocking(eventId: String): Response<NostrEvent>
 
     @JsExport.Ignore
-    fun quoteRepostBlocking(eventId: String, comment: String, contentWarning: String? = null): Response<NostrEvent>
+    fun quoteRepostBlocking(
+        eventId: String,
+        comment: String,
+        contentWarning: String? = null,
+        expiry: Long? = null,
+        sensitive: Boolean = false,
+    ): Response<NostrEvent>
 
     @JsExport.Ignore
     fun deleteBlocking(eventId: String, reason: String = ""): Response<Boolean>
