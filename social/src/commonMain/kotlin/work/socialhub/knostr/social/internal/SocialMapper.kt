@@ -52,6 +52,15 @@ object SocialMapper {
                 .firstOrNull { it.size >= 2 && it[0] == "content-warning" }
                 ?.get(1)
 
+            // NIP-40: expiry
+            expiry = event.tags
+                .firstOrNull { it.size >= 2 && it[0] == "X" }
+                ?.get(1)
+                ?.toLongOrNull()
+
+            // NIP-36: sensitive
+            isSensitive = event.tags.any { it.size >= 1 && it[0] == "sensitive" }
+
             // NIP-18: quote repost (q tag)
             quotedEventId = event.tags
                 .firstOrNull { it.size >= 2 && it[0] == "q" }
