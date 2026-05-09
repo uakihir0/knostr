@@ -247,8 +247,8 @@ class FeedResourceImpl(
         if (expiry != null) {
             allTags.add(listOf("expiration", expiry.toString()))
         }
-        if (sensitive) {
-            allTags.add(listOf("sensitive"))
+        if (sensitive && contentWarning == null) {
+            allTags.add(listOf("content-warning"))
         }
 
         val unsigned = UnsignedEvent(
@@ -280,8 +280,8 @@ class FeedResourceImpl(
         if (expiry != null) {
             tags.add(listOf("expiration", expiry.toString()))
         }
-        if (sensitive) {
-            tags.add(listOf("sensitive"))
+        if (sensitive && contentWarning == null) {
+            tags.add(listOf("content-warning"))
         }
 
         val unsigned = UnsignedEvent(
@@ -324,8 +324,8 @@ class FeedResourceImpl(
         if (expiry != null) {
             tags.add(listOf("expiration", expiry.toString()))
         }
-        if (sensitive) {
-            tags.add(listOf("sensitive"))
+        if (sensitive && contentWarning == null) {
+            tags.add(listOf("content-warning"))
         }
 
         val unsigned = UnsignedEvent(
@@ -403,12 +403,12 @@ class FeedResourceImpl(
                 event.tags.any { it.size >= 2 && it[0] == "imeta" } ||
                     event.content.contains(Regex("https?://\\S+\\.(jpg|jpeg|png|gif|webp|mp4|webm)", RegexOption.IGNORE_CASE))
             }
-            .take(limit)
             .map { SocialMapper.toNote(it) }
 
         if (excludeSensitive) {
             mediaNotes = mediaNotes.filterNot { it.isSensitive }
         }
+        mediaNotes = mediaNotes.take(limit)
 
         return Response(mediaNotes)
     }

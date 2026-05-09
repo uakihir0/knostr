@@ -48,7 +48,7 @@ class ArticleResourceImpl(
             tags.add(listOf("expiration", expiry.toString()))
         }
         if (sensitive) {
-            tags.add(listOf("sensitive"))
+            tags.add(listOf("content-warning"))
         }
 
         val unsigned = UnsignedEvent(
@@ -134,7 +134,7 @@ class ArticleResourceImpl(
             .firstOrNull { it.size >= 2 && it[0] == "expiration" }
             ?.get(1)
             ?.toLongOrNull()
-        article.isSensitive = event.tags.any { it.size >= 1 && it[0] == "sensitive" }
+        article.isSensitive = event.tags.any { it.size >= 1 && (it[0] == "content-warning" || it[0] == "sensitive") }
 
         return article
     }

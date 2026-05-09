@@ -59,7 +59,7 @@ object SocialMapper {
                 ?.toLongOrNull()
 
             // NIP-36: sensitive
-            isSensitive = event.tags.any { it.size >= 1 && it[0] == "sensitive" }
+            isSensitive = event.tags.any { it.size >= 1 && (it[0] == "content-warning" || it[0] == "sensitive") }
 
             // NIP-18: quote repost (q tag)
             quotedEventId = event.tags
