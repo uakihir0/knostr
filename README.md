@@ -303,14 +303,26 @@ All methods have both `suspend` (async) and `Blocking` (sync) variants.
 | NIP-17 | Private Direct Messages (Gift Wrap) | Implemented |
 | NIP-18 | Reposts (kind:6) | Implemented |
 | NIP-19 | Bech32 encoding (npub, nsec, note) | Implemented |
+| NIP-23 | Long-form content (kind:30023) | Implemented |
 | NIP-25 | Reactions (kind:7) | Implemented |
+| NIP-28 | Public channels (kind:40/41/42) | Implemented |
+| NIP-30 | Custom emoji reactions | Implemented |
+| NIP-36 | Sensitive content | Implemented |
+| NIP-40 | Expiry | Implemented |
 | NIP-44 | Versioned Encryption | Implemented |
+| NIP-46 | Nostr Connect (Bunker) | Implemented |
+| NIP-47 | Nostr Wallet Connect (NWC) | Implemented |
 | NIP-50 | Search | Implemented |
-| NIP-51 | Mute list (kind:10000) | Implemented |
+| NIP-51 | Mute list / Bookmark / Pin / Interest (kind:10000/10001/10003/10015) | Implemented |
 | NIP-57 | Lightning Zaps | Implemented |
+| NIP-58 | Badges (kind:30009/8/30008) | Implemented |
 | NIP-59 | Gift Wrap | Implemented |
+| NIP-65 | Relay list (kind:10002) | Implemented |
+| NIP-78 | App-specific data (kind:30078) | Implemented |
+| NIP-94 | File metadata (kind:1063) | Implemented |
 | NIP-96 | File upload | Implemented |
 | NIP-98 | HTTP Auth (for NIP-96) | Implemented |
+| NIP-315 | User status (kind:30315) | Implemented |
 
 ## Platform Support
 

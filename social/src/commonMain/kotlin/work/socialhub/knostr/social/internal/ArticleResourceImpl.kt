@@ -24,6 +24,8 @@ class ArticleResourceImpl(
         image: String?,
         hashtags: List<String>,
         publishedAt: Long?,
+        expiry: Long?,
+        sensitive: Boolean,
     ): Response<NostrEvent> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to publish article")
@@ -41,6 +43,12 @@ class ArticleResourceImpl(
         tags.add(listOf("published_at", effectivePublishedAt.toString()))
         for (hashtag in hashtags) {
             tags.add(listOf("t", hashtag.lowercase()))
+        }
+        if (expiry != null) {
+            tags.add(listOf("expiration", expiry.toString()))
+        }
+        if (sensitive) {
+            tags.add(listOf("content-warning"))
         }
 
         val unsigned = UnsignedEvent(
@@ -122,6 +130,12 @@ class ArticleResourceImpl(
         }
         article.hashtags = hashtags
 
+        article.expiry = event.tags
+            .firstOrNull { it.size >= 2 && it[0] == "expiration" }
+            ?.get(1)
+            ?.toLongOrNull()
+        article.isSensitive = event.tags.any { it.size >= 1 && (it[0] == "content-warning" || it[0] == "sensitive") }
+
         return article
     }
 
@@ -133,8 +147,10 @@ class ArticleResourceImpl(
         image: String?,
         hashtags: List<String>,
         publishedAt: Long?,
+        expiry: Long?,
+        sensitive: Boolean,
     ): Response<NostrEvent> {
-        return toBlocking { publishArticle(identifier, title, content, summary, image, hashtags, publishedAt) }
+        return toBlocking { publishArticle(identifier, title, content, summary, image, hashtags, publishedAt, expiry, sensitive) }
     }
 
     override fun getArticleBlocking(pubkey: String, identifier: String): Response<NostrArticle> {
