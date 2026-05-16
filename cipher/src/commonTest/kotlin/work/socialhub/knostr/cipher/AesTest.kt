@@ -102,7 +102,7 @@ class AesTest {
         val ciphertext = AesCbc.encrypt(plaintext, key, iv)
         val decrypted = AesCbc.decrypt(ciphertext, key, iv)
 
-        assertEquals(String(plaintext), String(decrypted))
+        assertEquals(plaintext.decodeToString(), decrypted.decodeToString())
     }
 
     // NIST AES-256-CBC test vector (SP 800-38A F.2.5/F.2.6)
