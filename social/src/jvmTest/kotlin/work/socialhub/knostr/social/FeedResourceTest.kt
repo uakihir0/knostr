@@ -274,6 +274,31 @@ class FeedResourceTest : AbstractTest() {
     }
 
     @Test
+    fun testGetHomeFeed() = runBlocking {
+        val social = social()
+        val nostr = social.nostr()
+        val scope = connectRelays(nostr)
+
+        try {
+            val response = social.feed().getHomeFeed(limit = 10)
+            val notes = response.data
+
+            println("Home feed: ${notes.size} notes")
+            notes.forEach { note ->
+                println("  [${note.noteId.take(12)}...] ${note.content.take(60)}")
+            }
+            assertNotNull(notes)
+            if (notes.isNotEmpty()) {
+                assertTrue(notes.first().noteId.isNotEmpty())
+            } else {
+                println("Home feed empty (user may have no follow list)")
+            }
+        } finally {
+            disconnectRelays(nostr, scope)
+        }
+    }
+
+    @Test
     fun testGetNoteWithLikeCount() = runBlocking {
         val social = social()
         val nostr = social.nostr()
