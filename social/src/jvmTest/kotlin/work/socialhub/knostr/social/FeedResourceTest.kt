@@ -3,6 +3,7 @@ package work.socialhub.knostr.social
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -146,6 +147,97 @@ class FeedResourceTest : AbstractTest() {
             }
             // Relay may return empty for some pubkeys; just verify API returns a list
             assertNotNull(notes)
+        } finally {
+            disconnectRelays(nostr, scope)
+        }
+    }
+
+    /**
+     * Live test guarding author resolution: a returned note must carry its
+     * author's kind:0 profile. Uses a broad relay set because a single relay
+     * often lacks the profile event. Regression guard for: (1) authors being
+     * populated at all, and (2) the multi-relay EOSE query not stopping before
+     * the relay holding the profile responds.
+     */
+    @Test
+    fun testUserFeedResolvesAuthor() = runBlocking {
+        val social = multiRelaySocial()
+        val nostr = social.nostr()
+        val scope = connectRelays(nostr)
+
+        try {
+            // fiatjaf — a well-known user whose profile is widely replicated.
+            val fiatjafPubkey = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+
+            var notes = social.feed().getUserFeed(fiatjafPubkey, limit = 5).data
+            var attempt = 0
+            while (notes.isEmpty() && attempt < 3) {
+                delay(3000)
+                notes = social.feed().getUserFeed(fiatjafPubkey, limit = 5).data
+                attempt++
+            }
+
+            println("User feed (multi-relay): ${notes.size} notes")
+            notes.forEach { note ->
+                println("  author=${note.author?.let { it.displayName ?: it.name }} pk=${note.author?.pubkey?.take(8)}")
+            }
+
+            assertTrue(notes.isNotEmpty(), "fiatjaf should have notes")
+            notes.forEach { note ->
+                assertNotNull(note.author, "note author should be populated")
+                assertEquals(
+                    fiatjafPubkey,
+                    note.author!!.pubkey,
+                    "author pubkey should match the note's author",
+                )
+            }
+            val name = notes.firstNotNullOfOrNull { it.author?.let { a -> a.displayName ?: a.name } }
+            assertNotNull(name, "fiatjaf's profile name should resolve")
+            println("Resolved name: $name")
+        } finally {
+            disconnectRelays(nostr, scope)
+        }
+    }
+
+    /**
+     * Live test for the home timeline — the path the app actually uses.
+     * Verifies the feed is fetched and that every returned note has its author
+     * profile resolved. The result depends on who the test account follows, so
+     * an empty feed is tolerated; when notes are present, all must have authors.
+     */
+    @Test
+    fun testHomeFeedResolvesAuthors() = runBlocking {
+        val social = multiRelaySocial()
+        val nostr = social.nostr()
+        val scope = connectRelays(nostr)
+
+        try {
+            var notes = social.feed().getHomeFeed(limit = 30).data
+            var attempt = 0
+            while (notes.isEmpty() && attempt < 3) {
+                delay(3000)
+                notes = social.feed().getHomeFeed(limit = 30).data
+                attempt++
+            }
+
+            val resolved = notes.count { it.author != null }
+            println("Home feed: ${notes.size} notes, $resolved with author")
+            notes.take(10).forEach { note ->
+                println("  [${note.event.pubkey.take(8)}] author=${note.author?.let { it.displayName ?: it.name }} :: ${note.content.take(40).replace("\n", " ")}")
+            }
+
+            // The test account may follow no one — only assert when notes exist.
+            notes.forEach { note ->
+                assertNotNull(
+                    note.author,
+                    "home feed note ${note.noteId.take(12)} should have a populated author",
+                )
+                assertEquals(
+                    note.event.pubkey,
+                    note.author!!.pubkey,
+                    "author pubkey should match the note's event pubkey",
+                )
+            }
         } finally {
             disconnectRelays(nostr, scope)
         }

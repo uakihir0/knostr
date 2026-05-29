@@ -31,6 +31,22 @@ open class AbstractTest {
         return NostrSocialFactory.instance(nostr())
     }
 
+    /**
+     * A broad relay set for tests that need reliable coverage of
+     * widely-replicated data (e.g. kind:0 profile metadata), which a single
+     * relay frequently fails to return within the query window.
+     */
+    fun multiRelaySocial(): NostrSocial {
+        val relays = (RELAYS!! + listOf(
+            "wss://relay.damus.io",
+            "wss://nos.lol",
+            "wss://relay.snort.social",
+            "wss://relay.primal.net",
+            "wss://nostr.wine",
+        )).distinct()
+        return NostrSocialFactory.instance(NostrFactory.instance(PRIVATE_KEY!!, relays))
+    }
+
     fun publicKey(): String {
         return createSigner(PRIVATE_KEY!!).getPublicKey()
     }

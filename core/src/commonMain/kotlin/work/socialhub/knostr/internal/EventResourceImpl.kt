@@ -33,10 +33,23 @@ class EventResourceImpl(
             val events = mutableListOf<NostrEvent>()
             val eoseDeferred = CompletableDeferred<Unit>()
 
+            // Wait for EOSE from every relay that was connected when we
+            // subscribed — not just the first. A relay that holds none of the
+            // requested events (e.g. a missing kind:0 profile) replies EOSE
+            // immediately, so completing on the first EOSE would cut the query
+            // short before slower relays that actually have the event respond.
+            val expectedEose = relayPool.getConnectedRelays().size.coerceAtLeast(1)
+            val eosedRelays = mutableSetOf<String>()
+
             val subId = relayPool.subscribe(
                 filters = filters,
                 onEvent = { event -> events.add(event) },
-                onEose = { eoseDeferred.complete(Unit) },
+                onEose = { relayUrl ->
+                    eosedRelays.add(relayUrl)
+                    if (eosedRelays.size >= expectedEose) {
+                        eoseDeferred.complete(Unit)
+                    }
+                },
             )
 
             try {

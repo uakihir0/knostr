@@ -60,7 +60,7 @@ class RelayPool {
             onOkCallback?.invoke(eventId, success, message)
         }
         connection.onEoseCallback = { subId ->
-            subscriptions[subId]?.onEose?.invoke()
+            subscriptions[subId]?.onEose?.invoke(url)
         }
         connection.onNoticeCallback = { message ->
             onNoticeCallback?.invoke(url, message)
@@ -120,7 +120,7 @@ class RelayPool {
     suspend fun subscribe(
         filters: List<NostrFilter>,
         onEvent: (NostrEvent) -> Unit,
-        onEose: (() -> Unit)? = null,
+        onEose: ((relayUrl: String) -> Unit)? = null,
     ): String {
         val subId = generateSubscriptionId()
         val subscription = Subscription(subId, filters, onEvent, onEose)
