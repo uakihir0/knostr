@@ -53,6 +53,7 @@ class FeedResourceImpl(
             notes = notes.filterNot { it.isSensitive }
         }
         if (notes.isNotEmpty()) {
+            populateAuthors(notes)
             populateLikeCounts(notes)
         }
 
@@ -60,7 +61,9 @@ class FeedResourceImpl(
     }
 
     override suspend fun getNote(eventId: String): Response<NostrNote> {
-        return getNoteInternal(eventId, visited = mutableSetOf())
+        val response = getNoteInternal(eventId, visited = mutableSetOf())
+        populateAuthors(listOf(response.data))
+        return response
     }
 
     private suspend fun getNoteInternal(eventId: String, visited: MutableSet<String>): Response<NostrNote> {
@@ -114,6 +117,7 @@ class FeedResourceImpl(
             notes = notes.filterNot { it.isSensitive }
         }
         if (notes.isNotEmpty()) {
+            populateAuthors(notes)
             populateLikeCounts(notes)
         }
         return Response(notes)
@@ -136,6 +140,7 @@ class FeedResourceImpl(
             notes = notes.filterNot { it.isSensitive }
         }
         if (notes.isNotEmpty()) {
+            populateAuthors(notes)
             populateLikeCounts(notes)
         }
         return Response(notes)
@@ -189,6 +194,7 @@ class FeedResourceImpl(
             .sortedBy { it.createdAt }
 
         thread.replies = ancestors + descendants
+        thread.rootNote?.let { populateAuthors(listOf(it) + thread.replies) }
         return Response(thread)
     }
 
@@ -206,6 +212,45 @@ class FeedResourceImpl(
 
         // Fallback: positional (last e-tag is reply target if multiple, only e-tag is root)
         return if (eTags.size == 1) eTags[0][1] else eTags.last()[1]
+    }
+
+    /**
+     * Populate the [NostrNote.author] of a list of notes by batch-fetching
+     * their authors' kind:0 metadata in a single relay query.
+     *
+     * Notes from [getHomeFeed] and friends carry only the raw event, so their
+     * author profile is unresolved until we look it up. Quoted notes are
+     * resolved in the same query so reposts/quotes show the original author too.
+     */
+    private suspend fun populateAuthors(notes: List<NostrNote>) {
+        if (notes.isEmpty()) return
+
+        // Collect every note we need a profile for, walking quoted-note chains.
+        val targets = mutableListOf<NostrNote>()
+        fun collect(note: NostrNote?) {
+            if (note == null || note in targets) return
+            targets.add(note)
+            collect(note.quotedNote)
+        }
+        notes.forEach { collect(it) }
+        val pubkeys = targets.map { it.event.pubkey }.distinct()
+        if (pubkeys.isEmpty()) return
+
+        val filter = NostrFilter(
+            authors = pubkeys,
+            kinds = listOf(EventKind.METADATA),
+        )
+        val response = nostr.events().queryEvents(listOf(filter))
+
+        // Keep only the latest metadata event per pubkey.
+        val usersByPubkey = response.data
+            .sortedByDescending { it.createdAt }
+            .distinctBy { it.pubkey }
+            .associate { it.pubkey to SocialMapper.toUser(it) }
+
+        for (note in targets) {
+            usersByPubkey[note.event.pubkey]?.let { note.author = it }
+        }
     }
 
     /** Populate likeCount for a list of notes by fetching reactions */
@@ -382,6 +427,9 @@ class FeedResourceImpl(
         if (excludeSensitive) {
             notes = notes.filterNot { it.isSensitive }
         }
+        if (notes.isNotEmpty()) {
+            populateAuthors(notes)
+        }
 
         return Response(notes)
     }
@@ -409,6 +457,9 @@ class FeedResourceImpl(
             mediaNotes = mediaNotes.filterNot { it.isSensitive }
         }
         mediaNotes = mediaNotes.take(limit)
+        if (mediaNotes.isNotEmpty()) {
+            populateAuthors(mediaNotes)
+        }
 
         return Response(mediaNotes)
     }
