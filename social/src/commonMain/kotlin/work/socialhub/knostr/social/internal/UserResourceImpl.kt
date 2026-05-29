@@ -9,6 +9,7 @@ import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.entity.NostrProfile
 import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.internal.InternalUtility
+import work.socialhub.knostr.social.NostrSocialConfig
 import work.socialhub.knostr.social.api.UserResource
 import work.socialhub.knostr.social.model.NostrRelationship
 import work.socialhub.knostr.social.model.NostrUser
@@ -20,9 +21,21 @@ import kotlin.time.Clock
 
 class UserResourceImpl(
     private val nostr: Nostr,
+    private val config: NostrSocialConfig = NostrSocialConfig(),
 ) : UserResource {
 
+    private data class ProfileCacheEntry(val user: NostrUser, val cachedAt: Long)
+    private val profileCache = mutableMapOf<String, ProfileCacheEntry>()
+
     override suspend fun getProfile(pubkey: String): Response<NostrUser> {
+        if (config.cacheUserProfile) {
+            val now = Clock.System.now().toEpochMilliseconds()
+            val entry = profileCache[pubkey]
+            if (entry != null && (now - entry.cachedAt) < config.userProfileCacheTtlMs) {
+                return Response(entry.user)
+            }
+        }
+
         val filter = NostrFilter(
             authors = listOf(pubkey),
             kinds = listOf(EventKind.METADATA),
@@ -31,7 +44,6 @@ class UserResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
         val event = response.data.firstOrNull()
         if (event == null) {
-            // Return minimal user with just pubkey when profile not found
             val user = NostrUser().apply {
                 this.pubkey = pubkey
                 this.npub = Bech32.encode("npub", Hex.decode(pubkey))
@@ -39,7 +51,11 @@ class UserResourceImpl(
             return Response(user)
         }
 
-        return Response(SocialMapper.toUser(event))
+        val user = SocialMapper.toUser(event)
+        if (config.cacheUserProfile) {
+            profileCache[pubkey] = ProfileCacheEntry(user, Clock.System.now().toEpochMilliseconds())
+        }
+        return Response(user)
     }
 
     override suspend fun updateProfile(profile: NostrProfile): Response<NostrEvent> {

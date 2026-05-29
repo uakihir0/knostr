@@ -7,7 +7,7 @@ import kotlin.js.JsExport
 @JsExport
 object NostrSocialFactory {
 
-    fun instance(nostr: Nostr): NostrSocial {
-        return NostrSocialImpl(nostr)
+    fun instance(nostr: Nostr, config: NostrSocialConfig = NostrSocialConfig()): NostrSocial {
+        return NostrSocialImpl(nostr, config)
     }
 }
