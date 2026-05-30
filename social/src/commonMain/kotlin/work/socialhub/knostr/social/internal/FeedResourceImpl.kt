@@ -273,29 +273,44 @@ class FeedResourceImpl(
         }
 
         if (uncached.isNotEmpty()) {
-            val filter = NostrFilter(
-                authors = uncached,
-                kinds = listOf(EventKind.METADATA),
-            )
-            val response = nostr.events().queryEvents(listOf(filter))
+            // Batch in chunks to avoid relay limits on large filter arrays
+            val batchSize = 20
+            for (batch in uncached.chunked(batchSize)) {
+                val filter = NostrFilter(
+                    authors = batch,
+                    kinds = listOf(EventKind.METADATA),
+                    limit = batch.size * 2,
+                )
+                val response = nostr.events().queryEvents(listOf(filter))
 
-            val fetched = response.data
-                .sortedByDescending { it.createdAt }
-                .distinctBy { it.pubkey }
-                .associate { it.pubkey to SocialMapper.toUser(it) }
+                val fetched = response.data
+                    .sortedByDescending { it.createdAt }
+                    .distinctBy { it.pubkey }
+                    .associate { it.pubkey to SocialMapper.toUser(it) }
 
-            resolved.putAll(fetched)
+                resolved.putAll(fetched)
 
-            if (config.cacheUserProfile) {
-                val cacheTime = Clock.System.now().toEpochMilliseconds()
-                for ((pk, user) in fetched) {
-                    profileCache[pk] = ProfileCacheEntry(user, cacheTime)
+                if (config.cacheUserProfile) {
+                    val cacheTime = Clock.System.now().toEpochMilliseconds()
+                    for ((pk, user) in fetched) {
+                        profileCache[pk] = ProfileCacheEntry(user, cacheTime)
+                    }
                 }
             }
         }
 
         for (note in targets) {
-            resolved[note.event.pubkey]?.let { note.author = it }
+            val author = resolved[note.event.pubkey]
+            if (author != null) {
+                note.author = author
+            } else {
+                // Fallback: create a minimal user from pubkey
+                note.author = NostrUser().apply {
+                    pubkey = note.event.pubkey
+                    npub = Bech32.encode("npub", Hex.decode(note.event.pubkey))
+                    name = note.event.pubkey.take(8) + "..."
+                }
+            }
         }
     }
 
