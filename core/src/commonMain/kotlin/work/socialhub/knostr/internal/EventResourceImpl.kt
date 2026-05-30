@@ -1,6 +1,7 @@
 package work.socialhub.knostr.internal
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeout
 import kotlin.time.Clock
 import work.socialhub.knostr.EventKind
@@ -30,23 +31,20 @@ class EventResourceImpl(
 
     override suspend fun queryEvents(filters: List<NostrFilter>): Response<List<NostrEvent>> {
         try {
-            val events = mutableListOf<NostrEvent>()
+            val eventChannel = Channel<NostrEvent>(Channel.UNLIMITED)
             val eoseDeferred = CompletableDeferred<Unit>()
 
-            // Wait for EOSE from every relay that was connected when we
-            // subscribed — not just the first. A relay that holds none of the
-            // requested events (e.g. a missing kind:0 profile) replies EOSE
-            // immediately, so completing on the first EOSE would cut the query
-            // short before slower relays that actually have the event respond.
             val expectedEose = relayPool.getConnectedRelays().size.coerceAtLeast(1)
-            val eosedRelays = mutableSetOf<String>()
+            var eoseCount = 0
 
             val subId = relayPool.subscribe(
                 filters = filters,
-                onEvent = { event -> events.add(event) },
-                onEose = { relayUrl ->
-                    eosedRelays.add(relayUrl)
-                    if (eosedRelays.size >= expectedEose) {
+                onEvent = { event ->
+                    eventChannel.trySend(event)
+                },
+                onEose = { _ ->
+                    eoseCount++
+                    if (eoseCount >= expectedEose) {
                         eoseDeferred.complete(Unit)
                     }
                 },
@@ -62,7 +60,12 @@ class EventResourceImpl(
                 relayPool.unsubscribe(subId)
             }
 
-            return Response(events.toList())
+            eventChannel.close()
+            val events = mutableListOf<NostrEvent>()
+            for (event in eventChannel) {
+                events.add(event)
+            }
+            return Response(events)
         } catch (e: Exception) {
             throw NostrException(e)
         }
