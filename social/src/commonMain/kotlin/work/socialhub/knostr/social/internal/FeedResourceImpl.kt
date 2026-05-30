@@ -7,9 +7,11 @@ import work.socialhub.knostr.api.response.Response
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.entity.UnsignedEvent
+import work.socialhub.knostr.social.NostrSocialConfig
 import work.socialhub.knostr.social.api.FeedResource
 import work.socialhub.knostr.social.model.NostrNote
 import work.socialhub.knostr.social.model.NostrThread
+import work.socialhub.knostr.social.model.NostrUser
 import work.socialhub.knostr.util.Bech32
 import work.socialhub.knostr.util.Hex
 import work.socialhub.knostr.util.toBlocking
@@ -17,23 +19,53 @@ import kotlin.time.Clock
 
 class FeedResourceImpl(
     private val nostr: Nostr,
+    private val config: NostrSocialConfig = NostrSocialConfig(),
 ) : FeedResource {
 
-    override suspend fun getHomeFeed(since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
+    private var cachedFollowList: List<String>? = null
+    private var followListCachedAt: Long = 0
+
+    private data class ProfileCacheEntry(val user: NostrUser, val cachedAt: Long)
+    private val profileCache = mutableMapOf<String, ProfileCacheEntry>()
+
+    private suspend fun getFollowPubkeys(): List<String> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get home feed")
 
-        // First, get the follow list (kind:3)
+        if (config.cacheFollowList) {
+            val now = Clock.System.now().toEpochMilliseconds()
+            val cached = cachedFollowList
+            if (cached != null && (now - followListCachedAt) < config.followListCacheTtlMs) {
+                return cached
+            }
+        }
+
         val followFilter = NostrFilter(
             authors = listOf(signer.getPublicKey()),
             kinds = listOf(EventKind.FOLLOW_LIST),
             limit = 1,
         )
         val followResponse = nostr.events().queryEvents(listOf(followFilter))
-        val followPubkeys = followResponse.data
+        val pubkeys = followResponse.data
             .firstOrNull()
             ?.let { SocialMapper.toFollowList(it) }
             ?: listOf()
+
+        if (config.cacheFollowList && pubkeys.isNotEmpty()) {
+            cachedFollowList = pubkeys
+            followListCachedAt = Clock.System.now().toEpochMilliseconds()
+        }
+
+        return pubkeys
+    }
+
+    fun invalidateFollowListCache() {
+        cachedFollowList = null
+        followListCachedAt = 0
+    }
+
+    override suspend fun getHomeFeed(since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
+        val followPubkeys = getFollowPubkeys()
 
         if (followPubkeys.isEmpty()) {
             return Response(listOf())
@@ -214,18 +246,9 @@ class FeedResourceImpl(
         return if (eTags.size == 1) eTags[0][1] else eTags.last()[1]
     }
 
-    /**
-     * Populate the [NostrNote.author] of a list of notes by batch-fetching
-     * their authors' kind:0 metadata in a single relay query.
-     *
-     * Notes from [getHomeFeed] and friends carry only the raw event, so their
-     * author profile is unresolved until we look it up. Quoted notes are
-     * resolved in the same query so reposts/quotes show the original author too.
-     */
     private suspend fun populateAuthors(notes: List<NostrNote>) {
         if (notes.isEmpty()) return
 
-        // Collect every note we need a profile for, walking quoted-note chains.
         val targets = mutableListOf<NostrNote>()
         fun collect(note: NostrNote?) {
             if (note == null || note in targets) return
@@ -233,23 +256,46 @@ class FeedResourceImpl(
             collect(note.quotedNote)
         }
         notes.forEach { collect(it) }
-        val pubkeys = targets.map { it.event.pubkey }.distinct()
-        if (pubkeys.isEmpty()) return
+        val allPubkeys = targets.map { it.event.pubkey }.distinct()
+        if (allPubkeys.isEmpty()) return
 
-        val filter = NostrFilter(
-            authors = pubkeys,
-            kinds = listOf(EventKind.METADATA),
-        )
-        val response = nostr.events().queryEvents(listOf(filter))
+        val now = Clock.System.now().toEpochMilliseconds()
+        val resolved = mutableMapOf<String, NostrUser>()
+        val uncached = mutableListOf<String>()
 
-        // Keep only the latest metadata event per pubkey.
-        val usersByPubkey = response.data
-            .sortedByDescending { it.createdAt }
-            .distinctBy { it.pubkey }
-            .associate { it.pubkey to SocialMapper.toUser(it) }
+        for (pk in allPubkeys) {
+            val entry = if (config.cacheUserProfile) profileCache[pk] else null
+            if (entry != null && (now - entry.cachedAt) < config.userProfileCacheTtlMs) {
+                resolved[pk] = entry.user
+            } else {
+                uncached.add(pk)
+            }
+        }
+
+        if (uncached.isNotEmpty()) {
+            val filter = NostrFilter(
+                authors = uncached,
+                kinds = listOf(EventKind.METADATA),
+            )
+            val response = nostr.events().queryEvents(listOf(filter))
+
+            val fetched = response.data
+                .sortedByDescending { it.createdAt }
+                .distinctBy { it.pubkey }
+                .associate { it.pubkey to SocialMapper.toUser(it) }
+
+            resolved.putAll(fetched)
+
+            if (config.cacheUserProfile) {
+                val cacheTime = Clock.System.now().toEpochMilliseconds()
+                for ((pk, user) in fetched) {
+                    profileCache[pk] = ProfileCacheEntry(user, cacheTime)
+                }
+            }
+        }
 
         for (note in targets) {
-            usersByPubkey[note.event.pubkey]?.let { note.author = it }
+            resolved[note.event.pubkey]?.let { note.author = it }
         }
     }
 

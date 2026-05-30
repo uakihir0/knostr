@@ -2,6 +2,7 @@ package work.socialhub.knostr.social.internal
 
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.social.NostrSocial
+import work.socialhub.knostr.social.NostrSocialConfig
 import work.socialhub.knostr.social.api.FeedResource
 import work.socialhub.knostr.social.api.MediaResource
 import work.socialhub.knostr.social.api.MessageResource
@@ -24,10 +25,11 @@ import work.socialhub.knostr.social.api.ZapResource
 
 class NostrSocialImpl(
     private val nostr: Nostr,
+    private val config: NostrSocialConfig = NostrSocialConfig(),
 ) : NostrSocial {
 
-    private val feed: FeedResource = FeedResourceImpl(nostr)
-    private val users: UserResource = UserResourceImpl(nostr)
+    private val feed: FeedResource = FeedResourceImpl(nostr, config)
+    private val users: UserResource = UserResourceImpl(nostr, config)
     private val reactions: ReactionResource = ReactionResourceImpl(nostr)
     private val search: SearchResource = SearchResourceImpl(nostr)
     private val media: MediaResource = MediaResourceImpl(nostr)
