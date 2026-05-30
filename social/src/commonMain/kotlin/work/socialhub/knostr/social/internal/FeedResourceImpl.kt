@@ -279,7 +279,6 @@ class FeedResourceImpl(
                 val filter = NostrFilter(
                     authors = batch,
                     kinds = listOf(EventKind.METADATA),
-                    limit = batch.size * 2,
                 )
                 val response = nostr.events().queryEvents(listOf(filter))
 

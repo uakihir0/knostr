@@ -3,6 +3,8 @@ package work.socialhub.knostr.internal
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeout
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.time.Clock
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.NostrConfig
@@ -29,13 +31,14 @@ class EventResourceImpl(
         }
     }
 
+    @OptIn(ExperimentalAtomicApi::class)
     override suspend fun queryEvents(filters: List<NostrFilter>): Response<List<NostrEvent>> {
         try {
             val eventChannel = Channel<NostrEvent>(Channel.UNLIMITED)
             val eoseDeferred = CompletableDeferred<Unit>()
 
             val expectedEose = relayPool.getConnectedRelays().size.coerceAtLeast(1)
-            var eoseCount = 0
+            val eoseCount = AtomicInt(0)
 
             val subId = relayPool.subscribe(
                 filters = filters,
@@ -43,8 +46,7 @@ class EventResourceImpl(
                     eventChannel.trySend(event)
                 },
                 onEose = { _ ->
-                    eoseCount++
-                    if (eoseCount >= expectedEose) {
+                    if (eoseCount.fetchAndAdd(1) + 1 >= expectedEose) {
                         eoseDeferred.complete(Unit)
                     }
                 },
