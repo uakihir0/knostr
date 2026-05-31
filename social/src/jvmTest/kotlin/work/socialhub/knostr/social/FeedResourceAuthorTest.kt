@@ -108,7 +108,7 @@ class FeedResourceAuthorTest {
     }
 
     @Test
-    fun authorIsNullWhenNoMetadataAvailable() = runBlocking {
+    fun fallbackAuthorWhenNoMetadataAvailable() = runBlocking {
         val notes = listOf(textNote("a1", alicePubkey, "hello"))
         // No metadata events at all.
         val feed = FeedResourceImpl(fakeNostr(notes, metadataEvents = listOf()))
@@ -116,7 +116,9 @@ class FeedResourceAuthorTest {
         val result = feed.getUserFeed(alicePubkey).data
 
         assertEquals(1, result.size)
-        assertNull(result[0].author, "author should stay null when no kind:0 is found")
+        assertNotNull(result[0].author, "author should be populated with fallback when no kind:0 is found")
+        assertEquals(alicePubkey, result[0].author!!.pubkey)
+        assertEquals(alicePubkey.take(8) + "...", result[0].author!!.name)
     }
 
     @Test
