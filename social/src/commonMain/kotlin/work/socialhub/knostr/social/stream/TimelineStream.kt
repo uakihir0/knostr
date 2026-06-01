@@ -1,14 +1,15 @@
 package work.socialhub.knostr.social.stream
 
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
+import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.social.internal.SocialMapper
 import work.socialhub.knostr.social.model.NostrNote
@@ -28,14 +29,41 @@ class TimelineStream(
     private var subscriptionId: String? = null
     private val authorCache = mutableMapOf<String, NostrUser>()
     private val cacheMutex = Mutex()
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var scope: CoroutineScope? = null
+    private var eventChannel: Channel<NostrEvent>? = null
 
     /** Start streaming home timeline for the given list of followed pubkeys */
     suspend fun start(followingPubkeys: List<String>) {
         if (followingPubkeys.isEmpty()) return
 
-        // Capture since before any async work to avoid missing notes during prefetch
+        val newScope = CoroutineScope(SupervisorJob())
+        scope = newScope
+
+        // Capture since before prefetch to avoid missing notes
         val since = Clock.System.now().epochSeconds
+
+        // Prefetch profiles so initial notes already have author info
+        prefetchProfiles(followingPubkeys)
+
+        // Channel serializes event processing to preserve relay ordering
+        val channel = Channel<NostrEvent>(Channel.UNLIMITED)
+        eventChannel = channel
+
+        newScope.launch {
+            for (event in channel) {
+                try {
+                    val note = SocialMapper.toNote(event)
+                    if (note.author == null) {
+                        cacheMutex.withLock {
+                            note.author = authorCache[event.pubkey]
+                        }
+                    }
+                    onNoteCallback?.invoke(note)
+                } catch (e: Exception) {
+                    onErrorCallback?.invoke(e)
+                }
+            }
+        }
 
         val filter = NostrFilter(
             authors = followingPubkeys,
@@ -46,26 +74,9 @@ class TimelineStream(
         subscriptionId = nostr.relayPool().subscribe(
             filters = listOf(filter),
             onEvent = { event ->
-                scope.launch {
-                    try {
-                        val note = SocialMapper.toNote(event)
-                        if (note.author == null) {
-                            cacheMutex.withLock {
-                                note.author = authorCache[event.pubkey]
-                            }
-                        }
-                        onNoteCallback?.invoke(note)
-                    } catch (e: Exception) {
-                        onErrorCallback?.invoke(e)
-                    }
-                }
+                channel.trySend(event)
             },
         )
-
-        // Prefetch profiles in the background after subscription is active
-        scope.launch {
-            prefetchProfiles(followingPubkeys)
-        }
     }
 
     private suspend fun prefetchProfiles(pubkeys: List<String>) {
@@ -96,6 +107,9 @@ class TimelineStream(
             nostr.relayPool().unsubscribe(it)
             subscriptionId = null
         }
-        scope.cancel()
+        eventChannel?.close()
+        eventChannel = null
+        scope?.cancel()
+        scope = null
     }
 }

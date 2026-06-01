@@ -1,9 +1,9 @@
 package work.socialhub.knostr.social.stream
 
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -33,10 +33,45 @@ class NotificationStream(
     private var subscriptionId: String? = null
     private val authorCache = mutableMapOf<String, NostrUser>()
     private val cacheMutex = Mutex()
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var scope: CoroutineScope? = null
+    private var eventChannel: Channel<NostrEvent>? = null
 
     /** Start streaming notifications for the given pubkey */
     suspend fun start(myPubkey: String) {
+        val newScope = CoroutineScope(SupervisorJob())
+        scope = newScope
+
+        val channel = Channel<NostrEvent>(Channel.UNLIMITED)
+        eventChannel = channel
+
+        newScope.launch {
+            for (event in channel) {
+                try {
+                    when (event.kind) {
+                        EventKind.TEXT_NOTE -> {
+                            val note = SocialMapper.toNote(event)
+                            if (note.author == null) {
+                                note.author = resolveAuthor(event.pubkey)
+                            }
+                            onMentionCallback?.invoke(note)
+                        }
+                        EventKind.REACTION -> {
+                            val reaction = SocialMapper.toReaction(event)
+                            if (reaction.author == null) {
+                                reaction.author = resolveAuthor(event.pubkey)
+                            }
+                            onReactionCallback?.invoke(reaction)
+                        }
+                        EventKind.REPOST -> {
+                            onRepostCallback?.invoke(event)
+                        }
+                    }
+                } catch (e: Exception) {
+                    onErrorCallback?.invoke(e)
+                }
+            }
+        }
+
         val filter = NostrFilter(
             kinds = listOf(EventKind.TEXT_NOTE, EventKind.REACTION, EventKind.REPOST),
             pTags = listOf(myPubkey),
@@ -46,31 +81,7 @@ class NotificationStream(
         subscriptionId = nostr.relayPool().subscribe(
             filters = listOf(filter),
             onEvent = { event ->
-                scope.launch {
-                    try {
-                        when (event.kind) {
-                            EventKind.TEXT_NOTE -> {
-                                val note = SocialMapper.toNote(event)
-                                if (note.author == null) {
-                                    note.author = resolveAuthor(event.pubkey)
-                                }
-                                onMentionCallback?.invoke(note)
-                            }
-                            EventKind.REACTION -> {
-                                val reaction = SocialMapper.toReaction(event)
-                                if (reaction.author == null) {
-                                    reaction.author = resolveAuthor(event.pubkey)
-                                }
-                                onReactionCallback?.invoke(reaction)
-                            }
-                            EventKind.REPOST -> {
-                                onRepostCallback?.invoke(event)
-                            }
-                        }
-                    } catch (e: Exception) {
-                        onErrorCallback?.invoke(e)
-                    }
-                }
+                channel.trySend(event)
             },
         )
     }
@@ -108,6 +119,9 @@ class NotificationStream(
             nostr.relayPool().unsubscribe(it)
             subscriptionId = null
         }
-        scope.cancel()
+        eventChannel?.close()
+        eventChannel = null
+        scope?.cancel()
+        scope = null
     }
 }
