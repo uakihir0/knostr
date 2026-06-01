@@ -273,28 +273,10 @@ class FeedResourceImpl(
         }
 
         if (uncached.isNotEmpty()) {
-            // Batch in chunks to avoid relay limits on large filter arrays
             val batchSize = 20
             for (batch in uncached.chunked(batchSize)) {
-                val filter = NostrFilter(
-                    authors = batch,
-                    kinds = listOf(EventKind.METADATA),
-                )
-                val response = nostr.events().queryEvents(listOf(filter))
-
-                val fetched = response.data
-                    .sortedByDescending { it.createdAt }
-                    .distinctBy { it.pubkey }
-                    .associate { it.pubkey to SocialMapper.toUser(it) }
-
+                val fetched = fetchProfileBatch(batch)
                 resolved.putAll(fetched)
-
-                if (config.cacheUserProfile) {
-                    val cacheTime = Clock.System.now().toEpochMilliseconds()
-                    for ((pk, user) in fetched) {
-                        profileCache[pk] = ProfileCacheEntry(user, cacheTime)
-                    }
-                }
             }
         }
 
@@ -303,14 +285,63 @@ class FeedResourceImpl(
             if (author != null) {
                 note.author = author
             } else {
-                // Fallback: create a minimal user from pubkey
-                note.author = NostrUser().apply {
-                    pubkey = note.event.pubkey
-                    npub = Bech32.encode("npub", Hex.decode(note.event.pubkey))
-                    name = note.event.pubkey.take(8) + "..."
+                // Use stale cache entry if available rather than an empty stub
+                val stale = profileCache[note.event.pubkey]
+                if (stale != null) {
+                    note.author = stale.user
+                } else {
+                    note.author = NostrUser().apply {
+                        pubkey = note.event.pubkey
+                        npub = Bech32.encode("npub", Hex.decode(note.event.pubkey))
+                        name = note.event.pubkey.take(8) + "..."
+                    }
                 }
             }
         }
+    }
+
+    private fun processMetadataEvents(events: List<NostrEvent>): Map<String, NostrUser> {
+        return events
+            .sortedByDescending { it.createdAt }
+            .distinctBy { it.pubkey }
+            .associate { it.pubkey to SocialMapper.toUser(it) }
+    }
+
+    /**
+     * Fetch kind:0 metadata for a batch of pubkeys with one retry for missing profiles.
+     * Relays sometimes return incomplete results; a single retry resolves most transient gaps.
+     */
+    private suspend fun fetchProfileBatch(pubkeys: List<String>): Map<String, NostrUser> {
+        val filter = NostrFilter(
+            authors = pubkeys,
+            kinds = listOf(EventKind.METADATA),
+        )
+        val response = nostr.events().queryEvents(listOf(filter))
+        val fetched = processMetadataEvents(response.data).toMutableMap()
+
+        // Retry once for pubkeys that got no response
+        val missing = pubkeys.filter { it !in fetched }
+        if (missing.isNotEmpty()) {
+            val retryFilter = NostrFilter(
+                authors = missing,
+                kinds = listOf(EventKind.METADATA),
+            )
+            try {
+                val retryResponse = nostr.events().queryEvents(listOf(retryFilter))
+                fetched.putAll(processMetadataEvents(retryResponse.data))
+            } catch (_: Exception) {
+                // Retry failed — proceed with what we have
+            }
+        }
+
+        if (config.cacheUserProfile) {
+            val cacheTime = Clock.System.now().toEpochMilliseconds()
+            for ((pk, user) in fetched) {
+                profileCache[pk] = ProfileCacheEntry(user, cacheTime)
+            }
+        }
+
+        return fetched
     }
 
     /** Populate likeCount for a list of notes by fetching reactions */

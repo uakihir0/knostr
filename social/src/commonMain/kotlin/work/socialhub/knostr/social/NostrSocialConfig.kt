@@ -15,5 +15,5 @@ class NostrSocialConfig {
     var cacheUserProfile: Boolean = true
 
     /** ユーザープロフィールキャッシュの有効期限 (ミリ秒) */
-    var userProfileCacheTtlMs: Long = 300_000
+    var userProfileCacheTtlMs: Long = 1_800_000
 }
