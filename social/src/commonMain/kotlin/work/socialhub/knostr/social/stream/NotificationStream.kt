@@ -1,5 +1,12 @@
 package work.socialhub.knostr.social.stream
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.entity.NostrFilter
@@ -25,6 +32,8 @@ class NotificationStream(
 
     private var subscriptionId: String? = null
     private val authorCache = mutableMapOf<String, NostrUser>()
+    private val cacheMutex = Mutex()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Start streaming notifications for the given pubkey */
     suspend fun start(myPubkey: String) {
@@ -37,49 +46,54 @@ class NotificationStream(
         subscriptionId = nostr.relayPool().subscribe(
             filters = listOf(filter),
             onEvent = { event ->
-                try {
-                    when (event.kind) {
-                        EventKind.TEXT_NOTE -> {
-                            val note = SocialMapper.toNote(event)
-                            if (note.author == null) {
-                                note.author = resolveAuthor(event.pubkey)
+                scope.launch {
+                    try {
+                        when (event.kind) {
+                            EventKind.TEXT_NOTE -> {
+                                val note = SocialMapper.toNote(event)
+                                if (note.author == null) {
+                                    note.author = resolveAuthor(event.pubkey)
+                                }
+                                onMentionCallback?.invoke(note)
                             }
-                            onMentionCallback?.invoke(note)
-                        }
-                        EventKind.REACTION -> {
-                            val reaction = SocialMapper.toReaction(event)
-                            if (reaction.author == null) {
-                                reaction.author = resolveAuthor(event.pubkey)
+                            EventKind.REACTION -> {
+                                val reaction = SocialMapper.toReaction(event)
+                                if (reaction.author == null) {
+                                    reaction.author = resolveAuthor(event.pubkey)
+                                }
+                                onReactionCallback?.invoke(reaction)
                             }
-                            onReactionCallback?.invoke(reaction)
+                            EventKind.REPOST -> {
+                                onRepostCallback?.invoke(event)
+                            }
                         }
-                        EventKind.REPOST -> {
-                            onRepostCallback?.invoke(event)
-                        }
+                    } catch (e: Exception) {
+                        onErrorCallback?.invoke(e)
                     }
-                } catch (e: Exception) {
-                    onErrorCallback?.invoke(e)
                 }
             },
         )
     }
 
-    private fun resolveAuthor(pubkey: String): NostrUser? {
-        authorCache[pubkey]?.let { return it }
-        // Attempt synchronous fetch (profile may already be in relay buffer)
+    private suspend fun resolveAuthor(pubkey: String): NostrUser? {
+        cacheMutex.withLock {
+            authorCache[pubkey]?.let { return it }
+        }
         try {
             val filter = NostrFilter(
                 authors = listOf(pubkey),
                 kinds = listOf(EventKind.METADATA),
                 limit = 1,
             )
-            val response = nostr.events().queryEventsBlocking(listOf(filter))
+            val response = nostr.events().queryEvents(listOf(filter))
             val event = response.data
                 .sortedByDescending { it.createdAt }
                 .firstOrNull()
             if (event != null) {
                 val user = SocialMapper.toUser(event)
-                authorCache[pubkey] = user
+                cacheMutex.withLock {
+                    authorCache[pubkey] = user
+                }
                 return user
             }
         } catch (_: Exception) {
@@ -94,5 +108,6 @@ class NotificationStream(
             nostr.relayPool().unsubscribe(it)
             subscriptionId = null
         }
+        scope.cancel()
     }
 }
