@@ -300,6 +300,13 @@ class FeedResourceImpl(
         }
     }
 
+    private fun processMetadataEvents(events: List<NostrEvent>): Map<String, NostrUser> {
+        return events
+            .sortedByDescending { it.createdAt }
+            .distinctBy { it.pubkey }
+            .associate { it.pubkey to SocialMapper.toUser(it) }
+    }
+
     /**
      * Fetch kind:0 metadata for a batch of pubkeys with one retry for missing profiles.
      * Relays sometimes return incomplete results; a single retry resolves most transient gaps.
@@ -310,12 +317,7 @@ class FeedResourceImpl(
             kinds = listOf(EventKind.METADATA),
         )
         val response = nostr.events().queryEvents(listOf(filter))
-
-        val fetched = response.data
-            .sortedByDescending { it.createdAt }
-            .distinctBy { it.pubkey }
-            .associate { it.pubkey to SocialMapper.toUser(it) }
-            .toMutableMap()
+        val fetched = processMetadataEvents(response.data).toMutableMap()
 
         // Retry once for pubkeys that got no response
         val missing = pubkeys.filter { it !in fetched }
@@ -326,11 +328,7 @@ class FeedResourceImpl(
             )
             try {
                 val retryResponse = nostr.events().queryEvents(listOf(retryFilter))
-                val retryFetched = retryResponse.data
-                    .sortedByDescending { it.createdAt }
-                    .distinctBy { it.pubkey }
-                    .associate { it.pubkey to SocialMapper.toUser(it) }
-                fetched.putAll(retryFetched)
+                fetched.putAll(processMetadataEvents(retryResponse.data))
             } catch (_: Exception) {
                 // Retry failed — proceed with what we have
             }
