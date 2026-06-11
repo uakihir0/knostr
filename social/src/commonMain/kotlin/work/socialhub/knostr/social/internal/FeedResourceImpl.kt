@@ -20,13 +20,11 @@ import kotlin.time.Clock
 class FeedResourceImpl(
     private val nostr: Nostr,
     private val config: NostrSocialConfig = NostrSocialConfig(),
+    private val profileCache: ProfileCache = ProfileCache(config),
 ) : FeedResource {
 
     private var cachedFollowList: List<String>? = null
     private var followListCachedAt: Long = 0
-
-    private data class ProfileCacheEntry(val user: NostrUser, val cachedAt: Long)
-    private val profileCache = mutableMapOf<String, ProfileCacheEntry>()
 
     private suspend fun getFollowPubkeys(): List<String> {
         val signer = nostr.signer()
@@ -259,21 +257,20 @@ class FeedResourceImpl(
         val allPubkeys = targets.map { it.event.pubkey }.distinct()
         if (allPubkeys.isEmpty()) return
 
-        val now = Clock.System.now().toEpochMilliseconds()
         val resolved = mutableMapOf<String, NostrUser>()
         val uncached = mutableListOf<String>()
 
         for (pk in allPubkeys) {
-            val entry = if (config.cacheUserProfile) profileCache[pk] else null
-            if (entry != null && (now - entry.cachedAt) < config.userProfileCacheTtlMs) {
-                resolved[pk] = entry.user
+            val cached = profileCache.get(pk)
+            if (cached != null) {
+                resolved[pk] = cached
             } else {
                 uncached.add(pk)
             }
         }
 
         if (uncached.isNotEmpty()) {
-            val batchSize = 20
+            val batchSize = 50
             for (batch in uncached.chunked(batchSize)) {
                 val fetched = fetchProfileBatch(batch)
                 resolved.putAll(fetched)
@@ -285,10 +282,9 @@ class FeedResourceImpl(
             if (author != null) {
                 note.author = author
             } else {
-                // Use stale cache entry if available rather than an empty stub
-                val stale = profileCache[note.event.pubkey]
+                val stale = profileCache.getStale(note.event.pubkey)
                 if (stale != null) {
-                    note.author = stale.user
+                    note.author = stale
                 } else {
                     note.author = NostrUser().apply {
                         pubkey = note.event.pubkey
@@ -334,13 +330,7 @@ class FeedResourceImpl(
             }
         }
 
-        if (config.cacheUserProfile) {
-            val cacheTime = Clock.System.now().toEpochMilliseconds()
-            for ((pk, user) in fetched) {
-                profileCache[pk] = ProfileCacheEntry(user, cacheTime)
-            }
-        }
-
+        profileCache.putAll(fetched)
         return fetched
     }
 

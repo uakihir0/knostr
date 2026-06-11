@@ -22,19 +22,12 @@ import kotlin.time.Clock
 class UserResourceImpl(
     private val nostr: Nostr,
     private val config: NostrSocialConfig = NostrSocialConfig(),
+    private val profileCache: ProfileCache = ProfileCache(config),
 ) : UserResource {
 
-    private data class ProfileCacheEntry(val user: NostrUser, val cachedAt: Long)
-    private val profileCache = mutableMapOf<String, ProfileCacheEntry>()
-
     override suspend fun getProfile(pubkey: String): Response<NostrUser> {
-        if (config.cacheUserProfile) {
-            val now = Clock.System.now().toEpochMilliseconds()
-            val entry = profileCache[pubkey]
-            if (entry != null && (now - entry.cachedAt) < config.userProfileCacheTtlMs) {
-                return Response(entry.user)
-            }
-        }
+        val cached = profileCache.get(pubkey)
+        if (cached != null) return Response(cached)
 
         val filter = NostrFilter(
             authors = listOf(pubkey),
@@ -52,9 +45,7 @@ class UserResourceImpl(
         }
 
         val user = SocialMapper.toUser(event)
-        if (config.cacheUserProfile) {
-            profileCache[pubkey] = ProfileCacheEntry(user, Clock.System.now().toEpochMilliseconds())
-        }
+        profileCache.put(pubkey, user)
         return Response(user)
     }
 

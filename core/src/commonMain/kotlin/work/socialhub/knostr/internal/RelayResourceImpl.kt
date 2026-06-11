@@ -1,6 +1,8 @@
 package work.socialhub.knostr.internal
 
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import work.socialhub.knostr.NostrConfig
 import work.socialhub.knostr.api.RelayResource
 import work.socialhub.knostr.relay.RelayPool
@@ -11,6 +13,8 @@ class RelayResourceImpl(
     private val relayPool: RelayPool,
 ) : RelayResource {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     override suspend fun connect() {
         // Add relays from config if not already added
         for (url in config.relayUrls) {
@@ -18,9 +22,7 @@ class RelayResourceImpl(
                 relayPool.addRelay(url, config)
             }
         }
-        coroutineScope {
-            relayPool.connectAll(this)
-        }
+        relayPool.connectAll(scope)
     }
 
     override suspend fun disconnect() {

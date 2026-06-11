@@ -87,7 +87,13 @@ class RelayPool {
             for (connection in connections.values) {
                 connection.setReconnectScope(scope)
                 if (!connection.isOpen) {
-                    scope.launch { connection.open() }
+                    scope.launch {
+                        try {
+                            connection.open()
+                        } catch (e: Exception) {
+                            onErrorCallback?.invoke(connection.url, e)
+                        }
+                    }
                 }
             }
         }

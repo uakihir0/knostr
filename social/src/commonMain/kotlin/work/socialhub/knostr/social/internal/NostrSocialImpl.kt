@@ -28,8 +28,9 @@ class NostrSocialImpl(
     private val config: NostrSocialConfig = NostrSocialConfig(),
 ) : NostrSocial {
 
-    private val feed: FeedResource = FeedResourceImpl(nostr, config)
-    private val users: UserResource = UserResourceImpl(nostr, config)
+    private val profileCache = ProfileCache(config)
+    private val feed: FeedResource = FeedResourceImpl(nostr, config, profileCache)
+    private val users: UserResource = UserResourceImpl(nostr, config, profileCache)
     private val reactions: ReactionResource = ReactionResourceImpl(nostr)
     private val search: SearchResource = SearchResourceImpl(nostr)
     private val media: MediaResource = MediaResourceImpl(nostr)
@@ -68,4 +69,5 @@ class NostrSocialImpl(
     override fun wallet() = wallet
     override fun appData() = appData
     override fun nostr() = nostr
+    override fun profileCache() = profileCache
 }
