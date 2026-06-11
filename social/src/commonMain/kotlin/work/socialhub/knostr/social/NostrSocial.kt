@@ -20,6 +20,7 @@ import work.socialhub.knostr.social.api.PollResource
 import work.socialhub.knostr.social.api.RelayListResource
 import work.socialhub.knostr.social.api.WalletResource
 import work.socialhub.knostr.social.api.ZapResource
+import work.socialhub.knostr.social.internal.ProfileCache
 import kotlin.js.JsExport
 
 @JsExport
@@ -44,4 +45,5 @@ interface NostrSocial {
     fun wallet(): WalletResource
     fun appData(): AppDataResource
     fun nostr(): Nostr
+    fun profileCache(): ProfileCache
 }

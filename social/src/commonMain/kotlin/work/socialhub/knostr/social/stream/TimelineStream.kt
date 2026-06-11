@@ -11,6 +11,7 @@ import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
+import work.socialhub.knostr.social.internal.ProfileCache
 import work.socialhub.knostr.social.internal.SocialMapper
 import work.socialhub.knostr.social.model.NostrNote
 import work.socialhub.knostr.social.model.NostrUser
@@ -22,12 +23,13 @@ import kotlin.time.Clock
  */
 class TimelineStream(
     private val nostr: Nostr,
+    private val profileCache: ProfileCache? = null,
 ) {
     var onNoteCallback: ((NostrNote) -> Unit)? = null
     var onErrorCallback: ((Exception) -> Unit)? = null
 
     private var subscriptionId: String? = null
-    private val authorCache = mutableMapOf<String, NostrUser>()
+    private val localCache = mutableMapOf<String, NostrUser>()
     private val cacheMutex = Mutex()
     private var scope: CoroutineScope? = null
     private var eventChannel: Channel<NostrEvent>? = null
@@ -54,9 +56,8 @@ class TimelineStream(
                 try {
                     val note = SocialMapper.toNote(event)
                     if (note.author == null) {
-                        cacheMutex.withLock {
-                            note.author = authorCache[event.pubkey]
-                        }
+                        note.author = profileCache?.get(event.pubkey)
+                            ?: cacheMutex.withLock { localCache[event.pubkey] }
                     }
                     onNoteCallback?.invoke(note)
                 } catch (e: Exception) {
@@ -80,7 +81,7 @@ class TimelineStream(
     }
 
     private suspend fun prefetchProfiles(pubkeys: List<String>) {
-        for (batch in pubkeys.chunked(50)) {
+        for (batch in pubkeys.chunked(100)) {
             try {
                 val filter = NostrFilter(
                     authors = batch,
@@ -90,10 +91,10 @@ class TimelineStream(
                 val users = response.data
                     .sortedByDescending { it.createdAt }
                     .distinctBy { it.pubkey }
+                val mapped = users.associate { it.pubkey to SocialMapper.toUser(it) }
+                profileCache?.putAll(mapped)
                 cacheMutex.withLock {
-                    users.forEach { event ->
-                        authorCache[event.pubkey] = SocialMapper.toUser(event)
-                    }
+                    localCache.putAll(mapped)
                 }
             } catch (_: Exception) {
                 // Best-effort per batch: continue with remaining batches
