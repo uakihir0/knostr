@@ -2,6 +2,8 @@ package work.socialhub.knostr.social
 
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.social.internal.SocialMapper
+import work.socialhub.knostr.util.Bech32
+import work.socialhub.knostr.util.Hex
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -111,6 +113,88 @@ class SocialMapperTest {
         val note = SocialMapper.toNote(event)
         assertEquals("first_event_id", note.rootEventId)
         assertEquals("third_event_id", note.replyToEventId)
+    }
+
+    @Test
+    fun testToNote_quoteFromQTag() {
+        val event = NostrEvent(
+            id = eventId1,
+            pubkey = testPubkey,
+            createdAt = 2000,
+            kind = 1,
+            tags = listOf(listOf("q", eventId2)),
+            content = "Great point!",
+            sig = testSig,
+        )
+        val note = SocialMapper.toNote(event)
+        assertEquals(eventId2, note.quotedEventId)
+    }
+
+    @Test
+    fun testToNote_quoteFallbackFromContent() {
+        // No q-tag: the quote target is recovered from an inline nostr: reference.
+        val noteRef = Bech32.encode("note", Hex.decode(eventId2))
+        val event = NostrEvent(
+            id = eventId1,
+            pubkey = testPubkey,
+            createdAt = 2000,
+            kind = 1,
+            tags = listOf(),
+            content = "Look at this nostr:$noteRef",
+            sig = testSig,
+        )
+        val note = SocialMapper.toNote(event)
+        assertEquals(eventId2, note.quotedEventId)
+    }
+
+    @Test
+    fun testToNote_qTagTakesPrecedenceOverContent() {
+        // When both exist, the explicit q-tag wins over the inline reference.
+        val noteRef = Bech32.encode("note", Hex.decode(eventId3))
+        val event = NostrEvent(
+            id = eventId1,
+            pubkey = testPubkey,
+            createdAt = 2000,
+            kind = 1,
+            tags = listOf(listOf("q", eventId2)),
+            content = "Both here nostr:$noteRef",
+            sig = testSig,
+        )
+        val note = SocialMapper.toNote(event)
+        assertEquals(eventId2, note.quotedEventId)
+    }
+
+    @Test
+    fun testToNote_replyReferenceNotTreatedAsQuote() {
+        // A reply that mentions its own parent inline must not become a quote.
+        val parentRef = Bech32.encode("note", Hex.decode(eventId2))
+        val event = NostrEvent(
+            id = eventId1,
+            pubkey = testPubkey,
+            createdAt = 2000,
+            kind = 1,
+            tags = listOf(listOf("e", eventId2, "", "reply")),
+            content = "Replying inline to nostr:$parentRef",
+            sig = testSig,
+        )
+        val note = SocialMapper.toNote(event)
+        assertEquals(eventId2, note.replyToEventId)
+        assertNull(note.quotedEventId)
+    }
+
+    @Test
+    fun testToNote_noQuoteWhenPlainContent() {
+        val event = NostrEvent(
+            id = eventId1,
+            pubkey = testPubkey,
+            createdAt = 2000,
+            kind = 1,
+            tags = listOf(),
+            content = "Just a normal note",
+            sig = testSig,
+        )
+        val note = SocialMapper.toNote(event)
+        assertNull(note.quotedEventId)
     }
 
     @Test
