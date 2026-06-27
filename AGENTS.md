@@ -115,7 +115,7 @@ All methods have both `suspend` (async) and `Blocking` (sync) variants.
 - **Kinds**: Integer type identifiers. 0=metadata, 1=text note, 3=follow list, 4=encrypted DM (legacy), 5=deletion, 6=repost, 7=reaction, 13=seal, 14=chat message, 1059=gift wrap, 9734=zap request, 9735=zap receipt, 10000=mute list.
 - **Relays**: WebSocket servers that store/forward events. Clients connect to multiple relays.
 - **Filters**: JSON objects specifying event queries (by author, kind, tags, time range).
-- **NIPs**: NIP-01 (base protocol), NIP-02 (follow list), NIP-04 (encrypted DM, legacy), NIP-05 (DNS identity), NIP-09 (deletion), NIP-10 (reply threading), NIP-17 (private DMs), NIP-18 (reposts), NIP-19 (bech32 encoding), NIP-25 (reactions), NIP-44 (versioned encryption), NIP-50 (search), NIP-51 (mute list), NIP-57 (zaps), NIP-59 (gift wrap), NIP-96 (file upload), NIP-98 (HTTP auth).
+- **NIPs**: NIP-01 (base protocol), NIP-02 (follow list), NIP-04 (encrypted DM, legacy), NIP-05 (DNS identity), NIP-09 (deletion), NIP-10 (reply threading), NIP-17 (private DMs), NIP-18 (reposts), NIP-19 (bech32 encoding), NIP-21 (`nostr:` URI), NIP-25 (reactions), NIP-44 (versioned encryption), NIP-50 (search), NIP-51 (mute list), NIP-57 (zaps), NIP-59 (gift wrap), NIP-96 (file upload), NIP-98 (HTTP auth).
 
 ## Key Patterns
 

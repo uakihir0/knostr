@@ -11,6 +11,7 @@ import work.socialhub.knostr.social.model.NostrUser
 import work.socialhub.knostr.social.model.NostrZap
 import work.socialhub.knostr.util.Bech32
 import work.socialhub.knostr.util.Hex
+import work.socialhub.knostr.util.Nip21
 
 /**
  * Maps core NostrEvent objects to social model objects.
@@ -82,6 +83,15 @@ object SocialMapper {
                         }
                     }
                 }
+            }
+
+            // NIP-18 fallback: if no q-tag is present, recover a quote target
+            // from an inline `nostr:note1.../nevent1...` reference in the content.
+            // Skip references that point at this note's reply/root target so a
+            // plain reply mentioning its parent is not mistaken for a quote.
+            if (quotedEventId == null) {
+                quotedEventId = Nip21.extractEventIds(content)
+                    .firstOrNull { it != replyToEventId && it != rootEventId }
             }
 
             // Parse NIP-94 imeta tags into media list
