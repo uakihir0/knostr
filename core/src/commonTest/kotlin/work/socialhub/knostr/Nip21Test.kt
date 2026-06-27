@@ -1,6 +1,7 @@
 package work.socialhub.knostr
 
 import work.socialhub.knostr.internal.NipResourceImpl
+import work.socialhub.knostr.util.Bech32
 import work.socialhub.knostr.util.Nip21
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -64,5 +65,15 @@ class Nip21Test {
         // Malformed bech32 (bad checksum) must be skipped, not throw.
         val content = "nostr:note1invalidchecksumxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
         assertTrue(Nip21.extractEventIds(content).isEmpty())
+    }
+
+    @Test
+    fun testIgnoresWrongLengthPayload() {
+        // A checksum-valid note token whose payload is not 32 bytes must be
+        // skipped, never surfaced as a malformed (non-64-char) event id.
+        val shortNote = Bech32.encode("note", ByteArray(16) { 1 })
+        val longNote = Bech32.encode("note", ByteArray(33) { 1 })
+        assertTrue(Nip21.extractEventIds("nostr:$shortNote").isEmpty())
+        assertTrue(Nip21.extractEventIds("nostr:$longNote").isEmpty())
     }
 }

@@ -12,6 +12,9 @@ object Nip21 {
     // NIP-19 TLV type for the primary value (event id for nevent).
     private const val TLV_SPECIAL = 0
 
+    // Event ids are always 32 bytes (64 hex chars).
+    private const val EVENT_ID_BYTES = 32
+
     // `nostr:` prefix followed by a note/nevent bech32 token.
     // The bech32 body is matched loosely; Bech32.decode validates the checksum.
     private val EVENT_REFERENCE = Regex("nostr:((?:note|nevent)1[ac-hj-np-z02-9]+)")
@@ -42,9 +45,11 @@ object Nip21 {
             val (hrp, data) = Bech32.decode(token)
             when (hrp) {
                 // note: data is the raw 32-byte event id.
-                "note" -> Hex.encode(data)
+                "note" -> data.takeIf { it.size == EVENT_ID_BYTES }?.let { Hex.encode(it) }
                 // nevent: data is TLV; the event id is the TLV_SPECIAL entry.
-                "nevent" -> tlvSpecial(data)?.let { Hex.encode(it) }
+                "nevent" -> tlvSpecial(data)
+                    ?.takeIf { it.size == EVENT_ID_BYTES }
+                    ?.let { Hex.encode(it) }
                 else -> null
             }
         } catch (_: Exception) {
