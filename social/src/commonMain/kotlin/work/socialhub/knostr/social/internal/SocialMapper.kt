@@ -145,6 +145,7 @@ object SocialMapper {
                                 "bh", "blurhash" -> media.blurhash = value
                                 "thumb", "image" -> media.thumbnailUrl = value
                                 "sha256" -> media.sha256 = value
+                                "alt" -> media.alt = value
                             }
                         }
                     }

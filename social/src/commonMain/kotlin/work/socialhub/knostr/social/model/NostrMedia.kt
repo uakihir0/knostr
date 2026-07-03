@@ -21,4 +21,6 @@ class NostrMedia {
     var blurhash: String? = null
     /** Thumbnail URL */
     var thumbnailUrl: String? = null
+    /** Alternate text describing the media (NIP-94 "alt", for accessibility) */
+    var alt: String? = null
 }
