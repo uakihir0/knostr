@@ -99,6 +99,17 @@ object SocialMapper {
         }
     }
 
+    /**
+     * Known NIP-94 / NIP-92 imeta field keys. Used to tell a flattened
+     * key-value pair (["url", "https://..."]) apart from a free-form value
+     * that merely happens to contain spaces ("a nice photo").
+     */
+    private val IMETA_KEYS = setOf(
+        "url", "m", "x", "ox", "size", "dim", "magnet", "i",
+        "blurhash", "bh", "thumb", "image", "summary", "alt",
+        "fallback", "service", "sha256",
+    )
+
     /** Parse imeta tags (NIP-94) into NostrMedia objects */
     private fun parseImetaTags(tags: List<List<String>>): List<NostrMedia> {
         val mediaList = mutableListOf<NostrMedia>()
@@ -117,8 +128,10 @@ object SocialMapper {
                     val (key, value) = if (entry.contains(" ")) {
                         val parts = entry.split(" ", limit = 2)
                         parts[0] to parts.getOrElse(1) { "" }
-                    } else if (i + 1 < entries.size && !entries[i + 1].contains(" ")) {
-                        // Separated key-value pair: ["url", "https://..."]
+                    } else if (entry in IMETA_KEYS && i + 1 < entries.size && entries[i + 1] !in IMETA_KEYS) {
+                        // Separated key-value pair: ["url", "https://..."]. The
+                        // value may contain spaces (e.g. alt "a nice photo"), so
+                        // we only require that the next entry is not itself a key.
                         val k = entry
                         val v = entries[i + 1]
                         i++ // skip next entry since we consumed it as value
@@ -145,6 +158,7 @@ object SocialMapper {
                                 "bh", "blurhash" -> media.blurhash = value
                                 "thumb", "image" -> media.thumbnailUrl = value
                                 "sha256" -> media.sha256 = value
+                                "alt" -> media.alt = value
                             }
                         }
                     }
