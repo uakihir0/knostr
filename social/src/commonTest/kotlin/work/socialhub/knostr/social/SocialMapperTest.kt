@@ -235,6 +235,76 @@ class SocialMapperTest {
     }
 
     @Test
+    fun testToNote_imetaFlattenedAltWithSpaces() {
+        // Flattened key-value form. The alt value contains spaces and must not
+        // be dropped or mis-parsed into separate entries.
+        val event = NostrEvent(
+            id = eventId1,
+            pubkey = testPubkey,
+            createdAt = 2000,
+            kind = 1,
+            tags = listOf(
+                listOf("imeta", "url", "https://example", "alt", "a nice photo", "m", "image/png"),
+            ),
+            content = "Photo",
+            sig = testSig,
+        )
+        val note = SocialMapper.toNote(event)
+        assertEquals(1, note.medias.size)
+        val media = note.medias[0]
+        assertEquals("https://example", media.url)
+        assertEquals("a nice photo", media.alt)
+        assertEquals("image/png", media.mimeType)
+    }
+
+    @Test
+    fun testToNote_imetaSpaceDelimitedAltWithSpaces() {
+        // NIP-92/94 canonical form: each field is a single "key value" entry.
+        val event = NostrEvent(
+            id = eventId1,
+            pubkey = testPubkey,
+            createdAt = 2000,
+            kind = 1,
+            tags = listOf(
+                listOf("imeta", "url https://example", "alt a nice photo", "m image/png", "dim 200x300"),
+            ),
+            content = "Photo",
+            sig = testSig,
+        )
+        val note = SocialMapper.toNote(event)
+        assertEquals(1, note.medias.size)
+        val media = note.medias[0]
+        assertEquals("https://example", media.url)
+        assertEquals("a nice photo", media.alt)
+        assertEquals("image/png", media.mimeType)
+        assertEquals(200, media.width)
+        assertEquals(300, media.height)
+    }
+
+    @Test
+    fun testToNote_imetaMultipleMedia() {
+        // Two imeta tags produce two media entries, each with its own alt.
+        val event = NostrEvent(
+            id = eventId1,
+            pubkey = testPubkey,
+            createdAt = 2000,
+            kind = 1,
+            tags = listOf(
+                listOf("imeta", "url", "https://example/1", "alt", "first one"),
+                listOf("imeta", "url", "https://example/2", "alt", "second one"),
+            ),
+            content = "Two photos",
+            sig = testSig,
+        )
+        val note = SocialMapper.toNote(event)
+        assertEquals(2, note.medias.size)
+        assertEquals("https://example/1", note.medias[0].url)
+        assertEquals("first one", note.medias[0].alt)
+        assertEquals("https://example/2", note.medias[1].url)
+        assertEquals("second one", note.medias[1].alt)
+    }
+
+    @Test
     fun testToFollowList() {
         val event = NostrEvent(
             id = eventId3,
