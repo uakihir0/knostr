@@ -9,9 +9,13 @@ import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.social.NostrSocialConfig
 import work.socialhub.knostr.social.api.FeedResource
+import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.model.NostrNote
+import work.socialhub.knostr.social.model.NostrNoteStats
 import work.socialhub.knostr.social.model.NostrThread
 import work.socialhub.knostr.social.model.NostrUser
+import work.socialhub.knostr.social.model.SocialDataBatch
+import work.socialhub.knostr.social.model.SocialDataRequest
 import work.socialhub.knostr.util.Bech32
 import work.socialhub.knostr.util.Hex
 import work.socialhub.knostr.util.toBlocking
@@ -20,7 +24,8 @@ import kotlin.time.Clock
 class FeedResourceImpl(
     private val nostr: Nostr,
     private val config: NostrSocialConfig = NostrSocialConfig(),
-    private val profileCache: ProfileCache = ProfileCache(config),
+    private val socialCache: SocialCache = MemorySocialCache(config),
+    private val enrichment: EnrichmentResourceImpl = EnrichmentResourceImpl(nostr, socialCache, config),
 ) : FeedResource {
 
     private var cachedFollowList: List<String>? = null
@@ -79,12 +84,14 @@ class FeedResourceImpl(
         )
         val feedResponse = nostr.events().queryEvents(listOf(feedFilter))
         var notes = feedResponse.data.map { SocialMapper.toNote(it) }
+        cacheNotes(notes)
         if (excludeSensitive) {
             notes = notes.filterNot { it.isSensitive }
         }
         if (notes.isNotEmpty()) {
             populateAuthors(notes)
             populateLikeCounts(notes)
+            populateQuotedNotes(notes)
         }
 
         return Response(notes)
@@ -93,6 +100,7 @@ class FeedResourceImpl(
     override suspend fun getNote(eventId: String): Response<NostrNote> {
         val response = getNoteInternal(eventId, visited = mutableSetOf())
         populateAuthors(listOf(response.data))
+        populateLikeCounts(listOf(response.data))
         return response
     }
 
@@ -102,6 +110,12 @@ class FeedResourceImpl(
         }
         visited.add(eventId)
 
+        val cached = cacheGet(SocialDataRequest(noteIds = listOf(eventId)))
+            .notes.firstOrNull { it.event.id == eventId }
+        if (cached != null) {
+            return Response(cached)
+        }
+
         val filter = NostrFilter(
             ids = listOf(eventId),
             limit = 1,
@@ -110,15 +124,7 @@ class FeedResourceImpl(
         val event = response.data.firstOrNull()
             ?: throw NostrException("Note not found: $eventId")
         val note = SocialMapper.toNote(event)
-
-        // Fetch reactions to populate likeCount
-        val reactionFilter = NostrFilter(
-            eTags = listOf(eventId),
-            kinds = listOf(EventKind.REACTION),
-            limit = 1000,
-        )
-        val reactionResponse = nostr.events().queryEvents(listOf(reactionFilter))
-        note.likeCount = SocialMapper.countLikes(reactionResponse.data)
+        cachePut(SocialDataBatch(notes = listOf(note)))
 
         // Resolve quoted note if q-tag present
         if (note.quotedEventId != null) {
@@ -126,7 +132,9 @@ class FeedResourceImpl(
                 val quotedResponse = getNoteInternal(note.quotedEventId!!, visited)
                 note.quotedNote = quotedResponse.data
             } catch (_: Exception) {
-                // Ignore if quoted note not found or circular reference
+                enrichment.requestMissing(
+                    SocialDataRequest(noteIds = listOf(note.quotedEventId!!))
+                )
             }
         }
 
@@ -143,12 +151,14 @@ class FeedResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         var notes = response.data.map { SocialMapper.toNote(it) }
+        cacheNotes(notes)
         if (excludeSensitive) {
             notes = notes.filterNot { it.isSensitive }
         }
         if (notes.isNotEmpty()) {
             populateAuthors(notes)
             populateLikeCounts(notes)
+            populateQuotedNotes(notes)
         }
         return Response(notes)
     }
@@ -166,12 +176,14 @@ class FeedResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         var notes = response.data.map { SocialMapper.toNote(it) }
+        cacheNotes(notes)
         if (excludeSensitive) {
             notes = notes.filterNot { it.isSensitive }
         }
         if (notes.isNotEmpty()) {
             populateAuthors(notes)
             populateLikeCounts(notes)
+            populateQuotedNotes(notes)
         }
         return Response(notes)
     }
@@ -190,6 +202,7 @@ class FeedResourceImpl(
             ?: throw NostrException("Note not found: $eventId")
 
         thread.rootNote = SocialMapper.toNote(targetEvent)
+        cacheNotes(listOfNotNull(thread.rootNote))
 
         // Walk ancestors (NIP-10 e-tags: root and reply markers)
         val ancestors = mutableListOf<NostrNote>()
@@ -222,9 +235,15 @@ class FeedResourceImpl(
             .filter { it.id != eventId }
             .map { SocialMapper.toNote(it) }
             .sortedBy { it.createdAt }
+        cacheNotes(ancestors + descendants)
 
         thread.replies = ancestors + descendants
-        thread.rootNote?.let { populateAuthors(listOf(it) + thread.replies) }
+        thread.rootNote?.let {
+            val allNotes = listOf(it) + thread.replies
+            populateAuthors(allNotes)
+            populateLikeCounts(allNotes)
+            populateQuotedNotes(allNotes)
+        }
         return Response(thread)
     }
 
@@ -257,11 +276,12 @@ class FeedResourceImpl(
         val allPubkeys = targets.map { it.event.pubkey }.distinct()
         if (allPubkeys.isEmpty()) return
 
-        val resolved = mutableMapOf<String, NostrUser>()
+        val resolved = cacheGet(SocialDataRequest(userPubkeys = allPubkeys))
+            .users.associateByTo(mutableMapOf()) { it.pubkey }
         val uncached = mutableListOf<String>()
 
         for (pk in allPubkeys) {
-            val cached = profileCache.get(pk)
+            val cached = resolved[pk]
             if (cached != null) {
                 resolved[pk] = cached
             } else {
@@ -277,22 +297,26 @@ class FeedResourceImpl(
             }
         }
 
+        val missing = allPubkeys.filter { it !in resolved }
+        if (socialCache is MemorySocialCache && missing.isNotEmpty()) {
+            socialCache.getStaleUsers(missing).forEach { resolved[it.pubkey] = it }
+        }
+
         for (note in targets) {
             val author = resolved[note.event.pubkey]
             if (author != null) {
                 note.author = author
             } else {
-                val stale = profileCache.getStale(note.event.pubkey)
-                if (stale != null) {
-                    note.author = stale
-                } else {
-                    note.author = NostrUser().apply {
-                        pubkey = note.event.pubkey
-                        npub = Bech32.encode("npub", Hex.decode(note.event.pubkey))
-                        name = note.event.pubkey.take(8) + "..."
-                    }
+                note.author = NostrUser().apply {
+                    pubkey = note.event.pubkey
+                    npub = Bech32.encode("npub", Hex.decode(note.event.pubkey))
+                    name = note.event.pubkey.take(8) + "..."
                 }
             }
+        }
+
+        if (missing.isNotEmpty()) {
+            enrichment.requestMissing(SocialDataRequest(userPubkeys = missing))
         }
     }
 
@@ -330,7 +354,7 @@ class FeedResourceImpl(
             }
         }
 
-        profileCache.putAll(fetched)
+        cachePut(SocialDataBatch(users = fetched.values.toList()))
         return fetched
     }
 
@@ -338,27 +362,97 @@ class FeedResourceImpl(
     private suspend fun populateLikeCounts(notes: List<NostrNote>) {
         if (notes.isEmpty()) return
 
-        // Collect all event IDs
         val eventIds = notes.map { it.event.id }
+        val cachedStats = cacheGet(SocialDataRequest(noteStatsEventIds = eventIds))
+            .noteStats.associateBy { it.eventId }
+        notes.forEach { note ->
+            cachedStats[note.event.id]?.let { applyStats(note, it) }
+        }
 
-        // Fetch reactions with a limit proportional to note count
-        // (cap at 5000 to avoid overwhelming relays)
         val reactionLimit = minOf(eventIds.size * 200, 5000)
-        val reactionFilter = NostrFilter(
+        val statsFilter = NostrFilter(
             eTags = eventIds,
-            kinds = listOf(EventKind.REACTION),
+            kinds = listOf(
+                EventKind.TEXT_NOTE,
+                EventKind.REPOST,
+                EventKind.GENERIC_REPOST,
+                EventKind.REACTION,
+            ),
             limit = reactionLimit,
         )
-        val reactionResponse = nostr.events().queryEvents(listOf(reactionFilter))
+        val statsResponse = nostr.events().queryEvents(listOf(statsFilter))
 
-        // Group reactions by target event ID
-        val reactionsByEvent = reactionResponse.data
-            .groupBy { SocialMapper.getReactionTarget(it) ?: "" }
-
-        // Populate likeCount for each note
+        val stats = mutableListOf<NostrNoteStats>()
         for (note in notes) {
-            val reactions = reactionsByEvent[note.event.id] ?: listOf()
-            note.likeCount = SocialMapper.countLikes(reactions)
+            val noteStats = calculateStats(note.event.id, statsResponse.data)
+            applyStats(note, noteStats)
+            stats.add(noteStats)
+        }
+        if (statsResponse.isComplete) {
+            cachePut(SocialDataBatch(noteStats = stats))
+        } else {
+            enrichment.requestMissing(SocialDataRequest(noteStatsEventIds = eventIds))
+        }
+    }
+
+    private suspend fun populateQuotedNotes(notes: List<NostrNote>) {
+        val targets = notes.mapNotNull { it.quotedEventId }.distinct()
+        if (targets.isEmpty()) return
+        val cached = cacheGet(SocialDataRequest(noteIds = targets))
+            .notes.associateBy { it.event.id }
+        notes.forEach { note ->
+            note.quotedNote = note.quotedEventId?.let { cached[it] }
+        }
+        val missing = targets.filter { it !in cached }
+        if (missing.isNotEmpty()) {
+            enrichment.requestMissing(SocialDataRequest(noteIds = missing))
+        }
+    }
+
+    private fun calculateStats(eventId: String, events: List<NostrEvent>): NostrNoteStats {
+        return NostrNoteStats(
+            eventId = eventId,
+            likeCount = SocialMapper.countLikes(
+                events.filter {
+                    it.kind == EventKind.REACTION && SocialMapper.getReactionTarget(it) == eventId
+                }
+            ),
+            replyCount = events.count {
+                it.kind == EventKind.TEXT_NOTE && findReplyParent(it) == eventId
+            },
+            repostCount = events.count {
+                (it.kind == EventKind.REPOST || it.kind == EventKind.GENERIC_REPOST) &&
+                    it.tags.any { tag -> tag.size >= 2 && tag[0] == "e" && tag[1] == eventId }
+            },
+        )
+    }
+
+    private fun applyStats(note: NostrNote, stats: NostrNoteStats) {
+        note.likeCount = stats.likeCount
+        note.replyCount = stats.replyCount
+        note.repostCount = stats.repostCount
+    }
+
+    private suspend fun cacheNotes(notes: List<NostrNote>) {
+        if (notes.isNotEmpty()) {
+            cachePut(SocialDataBatch(notes = notes))
+        }
+    }
+
+    private suspend fun cacheGet(request: SocialDataRequest): SocialDataBatch {
+        return try {
+            socialCache.get(request)
+        } catch (_: Exception) {
+            SocialDataBatch()
+        }
+    }
+
+    private suspend fun cachePut(batch: SocialDataBatch) {
+        if (batch.isEmpty()) return
+        try {
+            socialCache.put(batch)
+        } catch (_: Exception) {
+            // Cache failures must not fail the API request.
         }
     }
 
@@ -505,11 +599,14 @@ class FeedResourceImpl(
         )
         val noteResponse = nostr.events().queryEvents(listOf(noteFilter))
         var notes = noteResponse.data.map { SocialMapper.toNote(it) }
+        cacheNotes(notes)
         if (excludeSensitive) {
             notes = notes.filterNot { it.isSensitive }
         }
         if (notes.isNotEmpty()) {
             populateAuthors(notes)
+            populateLikeCounts(notes)
+            populateQuotedNotes(notes)
         }
 
         return Response(notes)
@@ -533,6 +630,7 @@ class FeedResourceImpl(
                     event.content.contains(Regex("https?://\\S+\\.(jpg|jpeg|png|gif|webp|mp4|webm)", RegexOption.IGNORE_CASE))
             }
             .map { SocialMapper.toNote(it) }
+        cacheNotes(mediaNotes)
 
         if (excludeSensitive) {
             mediaNotes = mediaNotes.filterNot { it.isSensitive }
@@ -540,6 +638,8 @@ class FeedResourceImpl(
         mediaNotes = mediaNotes.take(limit)
         if (mediaNotes.isNotEmpty()) {
             populateAuthors(mediaNotes)
+            populateLikeCounts(mediaNotes)
+            populateQuotedNotes(mediaNotes)
         }
 
         return Response(mediaNotes)

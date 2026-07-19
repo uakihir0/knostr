@@ -7,13 +7,19 @@ import work.socialhub.knostr.api.response.Response
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.entity.UnsignedEvent
+import work.socialhub.knostr.social.NostrSocialConfig
 import work.socialhub.knostr.social.api.ReactionResource
+import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.model.NostrReaction
+import work.socialhub.knostr.social.model.SocialDataRequest
 import work.socialhub.knostr.util.toBlocking
 import kotlin.time.Clock
 
 class ReactionResourceImpl(
     private val nostr: Nostr,
+    config: NostrSocialConfig = NostrSocialConfig(),
+    private val socialCache: SocialCache = MemorySocialCache(config),
+    private val enrichment: EnrichmentResourceImpl = EnrichmentResourceImpl(nostr, socialCache, config),
 ) : ReactionResource {
 
     override suspend fun like(eventId: String, authorPubkey: String): Response<NostrEvent> {
@@ -46,6 +52,7 @@ class ReactionResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val reactions = response.data.map { SocialMapper.toReaction(it) }
+        populateAuthors(reactions)
         return Response(reactions)
     }
 
@@ -87,7 +94,23 @@ class ReactionResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val reactions = response.data.map { SocialMapper.toReaction(it) }
+        populateAuthors(reactions)
         return Response(reactions)
+    }
+
+    private suspend fun populateAuthors(reactions: List<NostrReaction>) {
+        if (reactions.isEmpty()) return
+        val pubkeys = reactions.map { it.event.pubkey }.distinct()
+        val users = try {
+            socialCache.get(SocialDataRequest(userPubkeys = pubkeys)).users.associateBy { it.pubkey }
+        } catch (_: Exception) {
+            emptyMap()
+        }
+        reactions.forEach { it.author = users[it.event.pubkey] }
+        val missing = pubkeys.filter { it !in users }
+        if (missing.isNotEmpty()) {
+            enrichment.requestMissing(SocialDataRequest(userPubkeys = missing))
+        }
     }
 
     /**

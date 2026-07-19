@@ -11,15 +11,21 @@ import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.internal.InternalUtility
+import work.socialhub.knostr.social.NostrSocialConfig
 import work.socialhub.knostr.social.api.LnurlPayInfo
+import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.api.ZapResource
 import work.socialhub.knostr.social.model.NostrZap
+import work.socialhub.knostr.social.model.SocialDataRequest
 import work.socialhub.knostr.util.toBlocking
 import work.socialhub.khttpclient.HttpRequest
 import kotlin.time.Clock
 
 class ZapResourceImpl(
     private val nostr: Nostr,
+    config: NostrSocialConfig = NostrSocialConfig(),
+    private val socialCache: SocialCache = MemorySocialCache(config),
+    private val enrichment: EnrichmentResourceImpl = EnrichmentResourceImpl(nostr, socialCache, config),
 ) : ZapResource {
 
     private val json = Json {
@@ -66,6 +72,7 @@ class ZapResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val zaps = response.data.mapNotNull { SocialMapper.toZap(it) }
+        populateSenders(zaps)
         return Response(zaps)
     }
 
@@ -77,7 +84,23 @@ class ZapResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val zaps = response.data.mapNotNull { SocialMapper.toZap(it) }
+        populateSenders(zaps)
         return Response(zaps)
+    }
+
+    private suspend fun populateSenders(zaps: List<NostrZap>) {
+        val pubkeys = zaps.map { it.senderPubkey }.filter { it.isNotEmpty() }.distinct()
+        if (pubkeys.isEmpty()) return
+        val users = try {
+            socialCache.get(SocialDataRequest(userPubkeys = pubkeys)).users.associateBy { it.pubkey }
+        } catch (_: Exception) {
+            emptyMap()
+        }
+        zaps.forEach { zap -> zap.sender = users[zap.senderPubkey] }
+        val missing = pubkeys.filter { it !in users }
+        if (missing.isNotEmpty()) {
+            enrichment.requestMissing(SocialDataRequest(userPubkeys = missing))
+        }
     }
 
     override suspend fun getLnurlPayInfo(lud16: String): Response<LnurlPayInfo> {

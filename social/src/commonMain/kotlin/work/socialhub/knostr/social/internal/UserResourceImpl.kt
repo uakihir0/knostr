@@ -10,10 +10,13 @@ import work.socialhub.knostr.entity.NostrProfile
 import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.internal.InternalUtility
 import work.socialhub.knostr.social.NostrSocialConfig
+import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.api.UserResource
 import work.socialhub.knostr.social.model.NostrRelationship
 import work.socialhub.knostr.social.model.NostrUser
 import work.socialhub.knostr.social.model.NostrUserStatus
+import work.socialhub.knostr.social.model.SocialDataBatch
+import work.socialhub.knostr.social.model.SocialDataRequest
 import work.socialhub.knostr.util.Bech32
 import work.socialhub.knostr.util.Hex
 import work.socialhub.knostr.util.toBlocking
@@ -22,11 +25,13 @@ import kotlin.time.Clock
 class UserResourceImpl(
     private val nostr: Nostr,
     private val config: NostrSocialConfig = NostrSocialConfig(),
-    private val profileCache: ProfileCache = ProfileCache(config),
+    private val socialCache: SocialCache = MemorySocialCache(config),
+    private val enrichment: EnrichmentResourceImpl = EnrichmentResourceImpl(nostr, socialCache, config),
 ) : UserResource {
 
     override suspend fun getProfile(pubkey: String): Response<NostrUser> {
-        val cached = profileCache.get(pubkey)
+        val cached = cacheGet(SocialDataRequest(userPubkeys = listOf(pubkey)))
+            .users.firstOrNull { it.pubkey == pubkey }
         if (cached != null) return Response(cached)
 
         val filter = NostrFilter(
@@ -37,6 +42,7 @@ class UserResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
         val event = response.data.firstOrNull()
         if (event == null) {
+            enrichment.requestMissing(SocialDataRequest(userPubkeys = listOf(pubkey)))
             val user = NostrUser().apply {
                 this.pubkey = pubkey
                 this.npub = Bech32.encode("npub", Hex.decode(pubkey))
@@ -45,7 +51,7 @@ class UserResourceImpl(
         }
 
         val user = SocialMapper.toUser(event)
-        profileCache.put(pubkey, user)
+        cachePut(SocialDataBatch(users = listOf(user)))
         return Response(user)
     }
 
@@ -61,6 +67,7 @@ class UserResourceImpl(
         )
         val signed = signer.sign(unsigned)
         nostr.events().publishEvent(signed)
+        cachePut(SocialDataBatch(users = listOf(SocialMapper.toUser(signed))))
         return Response(signed)
     }
 
@@ -142,17 +149,32 @@ class UserResourceImpl(
     override suspend fun getProfiles(pubkeys: List<String>): Response<List<NostrUser>> {
         if (pubkeys.isEmpty()) return Response(listOf())
 
+        val uniquePubkeys = pubkeys.distinct()
+        val cached = cacheGet(SocialDataRequest(userPubkeys = uniquePubkeys))
+            .users.associateBy { it.pubkey }
+        val missing = uniquePubkeys.filter { it !in cached }
+        if (missing.isEmpty()) {
+            return Response(uniquePubkeys.mapNotNull { cached[it] })
+        }
+
         val filter = NostrFilter(
-            authors = pubkeys,
+            authors = missing,
             kinds = listOf(EventKind.METADATA),
         )
         val response = nostr.events().queryEvents(listOf(filter))
         // Take latest metadata per pubkey
-        val users = response.data
+        val fetched = response.data
             .sortedByDescending { it.createdAt }
             .distinctBy { it.pubkey }
             .map { SocialMapper.toUser(it) }
-        return Response(users)
+        cachePut(SocialDataBatch(users = fetched))
+
+        val fetchedByPubkey = fetched.associateBy { it.pubkey }
+        val unresolved = missing.filter { it !in fetchedByPubkey }
+        if (unresolved.isNotEmpty()) {
+            enrichment.requestMissing(SocialDataRequest(userPubkeys = unresolved))
+        }
+        return Response(uniquePubkeys.mapNotNull { cached[it] ?: fetchedByPubkey[it] })
     }
 
     override suspend fun verifyNip05(address: String): Response<Boolean> {
@@ -279,6 +301,23 @@ class UserResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         return response.data.firstOrNull()?.tags ?: listOf()
+    }
+
+    private suspend fun cacheGet(request: SocialDataRequest): SocialDataBatch {
+        return try {
+            socialCache.get(request)
+        } catch (_: Exception) {
+            SocialDataBatch()
+        }
+    }
+
+    private suspend fun cachePut(batch: SocialDataBatch) {
+        if (batch.isEmpty()) return
+        try {
+            socialCache.put(batch)
+        } catch (_: Exception) {
+            // Cache failures must not fail the API request.
+        }
     }
 
     override fun getProfileBlocking(pubkey: String): Response<NostrUser> {
