@@ -5,17 +5,18 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
-import work.socialhub.knostr.social.internal.ProfileCache
+import work.socialhub.knostr.social.api.EnrichmentResource
+import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.internal.SocialMapper
 import work.socialhub.knostr.social.model.NostrNote
 import work.socialhub.knostr.social.model.NostrReaction
 import work.socialhub.knostr.social.model.NostrUser
+import work.socialhub.knostr.social.model.SocialDataBatch
+import work.socialhub.knostr.social.model.SocialDataRequest
 import kotlin.time.Clock
 
 /**
@@ -25,7 +26,8 @@ import kotlin.time.Clock
  */
 class NotificationStream(
     private val nostr: Nostr,
-    private val profileCache: ProfileCache? = null,
+    private val socialCache: SocialCache,
+    private val enrichment: EnrichmentResource? = null,
 ) {
     var onMentionCallback: ((NostrNote) -> Unit)? = null
     var onReactionCallback: ((NostrReaction) -> Unit)? = null
@@ -33,8 +35,6 @@ class NotificationStream(
     var onErrorCallback: ((Exception) -> Unit)? = null
 
     private var subscriptionId: String? = null
-    private val localCache = mutableMapOf<String, NostrUser>()
-    private val cacheMutex = Mutex()
     private var scope: CoroutineScope? = null
     private var eventChannel: Channel<NostrEvent>? = null
 
@@ -89,9 +89,12 @@ class NotificationStream(
     }
 
     private suspend fun resolveAuthor(pubkey: String): NostrUser? {
-        profileCache?.get(pubkey)?.let { return it }
-        cacheMutex.withLock {
-            localCache[pubkey]?.let { return it }
+        try {
+            socialCache.get(SocialDataRequest(userPubkeys = listOf(pubkey)))
+                .users.firstOrNull { it.pubkey == pubkey }
+                ?.let { return it }
+        } catch (_: Exception) {
+            // Fall through to relay lookup.
         }
         try {
             val filter = NostrFilter(
@@ -105,15 +108,20 @@ class NotificationStream(
                 .firstOrNull()
             if (event != null) {
                 val user = SocialMapper.toUser(event)
-                profileCache?.put(pubkey, user)
-                cacheMutex.withLock {
-                    localCache[pubkey] = user
+                try {
+                    socialCache.put(SocialDataBatch(users = listOf(user)))
+                } catch (_: Exception) {
+                    // A cache failure does not discard relay data.
                 }
                 return user
             }
         } catch (_: Exception) {
             // Best-effort
         }
+        enrichment?.request(
+            SocialDataRequest(userPubkeys = listOf(pubkey)),
+            forceRefresh = false,
+        )
         return null
     }
 

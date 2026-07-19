@@ -5,16 +5,16 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
-import work.socialhub.knostr.social.internal.ProfileCache
+import work.socialhub.knostr.social.api.EnrichmentResource
+import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.internal.SocialMapper
 import work.socialhub.knostr.social.model.NostrNote
-import work.socialhub.knostr.social.model.NostrUser
+import work.socialhub.knostr.social.model.SocialDataBatch
+import work.socialhub.knostr.social.model.SocialDataRequest
 import kotlin.time.Clock
 
 /**
@@ -23,14 +23,13 @@ import kotlin.time.Clock
  */
 class TimelineStream(
     private val nostr: Nostr,
-    private val profileCache: ProfileCache? = null,
+    private val socialCache: SocialCache,
+    private val enrichment: EnrichmentResource? = null,
 ) {
     var onNoteCallback: ((NostrNote) -> Unit)? = null
     var onErrorCallback: ((Exception) -> Unit)? = null
 
     private var subscriptionId: String? = null
-    private val localCache = mutableMapOf<String, NostrUser>()
-    private val cacheMutex = Mutex()
     private var scope: CoroutineScope? = null
     private var eventChannel: Channel<NostrEvent>? = null
 
@@ -56,8 +55,13 @@ class TimelineStream(
                 try {
                     val note = SocialMapper.toNote(event)
                     if (note.author == null) {
-                        note.author = profileCache?.get(event.pubkey)
-                            ?: cacheMutex.withLock { localCache[event.pubkey] }
+                        note.author = cachedUser(event.pubkey)
+                        if (note.author == null) {
+                            enrichment?.request(
+                                SocialDataRequest(userPubkeys = listOf(event.pubkey)),
+                                forceRefresh = false,
+                            )
+                        }
                     }
                     onNoteCallback?.invoke(note)
                 } catch (e: Exception) {
@@ -92,14 +96,28 @@ class TimelineStream(
                     .sortedByDescending { it.createdAt }
                     .distinctBy { it.pubkey }
                 val mapped = users.associate { it.pubkey to SocialMapper.toUser(it) }
-                profileCache?.putAll(mapped)
-                cacheMutex.withLock {
-                    localCache.putAll(mapped)
+                socialCache.put(SocialDataBatch(users = mapped.values.toList()))
+                val missing = batch.filter { it !in mapped }
+                if (missing.isNotEmpty()) {
+                    enrichment?.request(
+                        SocialDataRequest(userPubkeys = missing),
+                        forceRefresh = false,
+                    )
                 }
             } catch (_: Exception) {
-                // Best-effort per batch: continue with remaining batches
+                enrichment?.request(
+                    SocialDataRequest(userPubkeys = batch),
+                    forceRefresh = false,
+                )
             }
         }
+    }
+
+    private suspend fun cachedUser(pubkey: String) = try {
+        socialCache.get(SocialDataRequest(userPubkeys = listOf(pubkey)))
+            .users.firstOrNull { it.pubkey == pubkey }
+    } catch (_: Exception) {
+        null
     }
 
     /** Stop streaming */
