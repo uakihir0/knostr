@@ -236,6 +236,7 @@ object SocialMapper {
                         try {
                             val zapRequest = InternalUtility.fromJson<NostrEvent>(tag[1])
                             zap.message = zapRequest.content
+                            zap.senderPubkey = zapRequest.pubkey
                         } catch (_: Exception) {
                         }
                     }
