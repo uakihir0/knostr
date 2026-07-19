@@ -9,6 +9,8 @@ class NostrZap {
     lateinit var event: NostrEvent
     /** The sender of the zap */
     var sender: NostrUser? = null
+    /** Sender pubkey extracted from the embedded zap request. */
+    var senderPubkey: String = ""
     /** The recipient of the zap */
     var recipientPubkey: String = ""
     /** Target event ID (if zapping a specific note) */
