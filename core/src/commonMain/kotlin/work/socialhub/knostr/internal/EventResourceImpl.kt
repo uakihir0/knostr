@@ -52,12 +52,14 @@ class EventResourceImpl(
                 },
             )
 
+            var isComplete = true
             try {
                 withTimeout(config.queryTimeoutMs) {
                     eoseDeferred.await()
                 }
             } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
                 // Timeout: return what we have so far
+                isComplete = false
             } finally {
                 relayPool.unsubscribe(subId)
             }
@@ -67,7 +69,9 @@ class EventResourceImpl(
             for (event in eventChannel) {
                 events.add(event)
             }
-            return Response(events)
+            return Response<List<NostrEvent>>(events).also {
+                it.isComplete = isComplete
+            }
         } catch (e: Exception) {
             throw NostrException(e)
         }

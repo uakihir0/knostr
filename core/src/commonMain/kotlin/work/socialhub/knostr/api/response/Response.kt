@@ -7,4 +7,7 @@ class Response<T>(
     var data: T,
 ) {
     var json: String? = null
+
+    /** False when a query returned partial data because it timed out before EOSE. */
+    var isComplete: Boolean = true
 }
