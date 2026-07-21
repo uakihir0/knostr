@@ -200,7 +200,9 @@ class RelayPool {
         }
 
         // Deduplicate events by ID
-        if (!seenEventIds.add(event.id)) {
+        // Deduplicate copies from multiple relays within one subscription, while
+        // allowing a later query subscription to receive the same event again.
+        if (!seenEventIds.add("$subscriptionId:${event.id}")) {
             return
         }
 
