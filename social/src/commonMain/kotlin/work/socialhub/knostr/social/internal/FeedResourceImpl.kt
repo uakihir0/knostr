@@ -370,26 +370,13 @@ class FeedResourceImpl(
             cachedStats[note.event.id]?.let { applyStats(note, it) }
         }
 
-        val reactionLimit = minOf(eventIds.size * 200, 5000)
-        val statsFilter = NostrFilter(
-            eTags = eventIds,
-            kinds = listOf(
-                EventKind.TEXT_NOTE,
-                EventKind.REPOST,
-                EventKind.GENERIC_REPOST,
-                EventKind.REACTION,
-            ),
-            limit = reactionLimit,
-        )
-        val statsResponse = nostr.events().queryEvents(listOf(statsFilter))
-
-        val stats = mutableListOf<NostrNoteStats>()
-        for (note in notes) {
-            val noteStats = calculateStats(note.event.id, statsResponse.data)
-            applyStats(note, noteStats)
-            stats.add(noteStats)
-        }
+        val statsResponse = nostr.events().queryEvents(SocialStats.filters(eventIds))
         if (statsResponse.isComplete) {
+            val stats = notes.map { note ->
+                SocialStats.calculate(note.event.id, statsResponse.data).also {
+                    applyStats(note, it)
+                }
+            }
             cachePut(SocialDataBatch(noteStats = stats))
         } else {
             enrichment.requestMissing(SocialDataRequest(noteStatsEventIds = eventIds))
@@ -408,24 +395,6 @@ class FeedResourceImpl(
         if (missing.isNotEmpty()) {
             enrichment.requestMissing(SocialDataRequest(noteIds = missing))
         }
-    }
-
-    private fun calculateStats(eventId: String, events: List<NostrEvent>): NostrNoteStats {
-        return NostrNoteStats(
-            eventId = eventId,
-            likeCount = SocialMapper.countLikes(
-                events.filter {
-                    it.kind == EventKind.REACTION && SocialMapper.getReactionTarget(it) == eventId
-                }
-            ),
-            replyCount = events.count {
-                it.kind == EventKind.TEXT_NOTE && findReplyParent(it) == eventId
-            },
-            repostCount = events.count {
-                (it.kind == EventKind.REPOST || it.kind == EventKind.GENERIC_REPOST) &&
-                    it.tags.any { tag -> tag.size >= 2 && tag[0] == "e" && tag[1] == eventId }
-            },
-        )
     }
 
     private fun applyStats(note: NostrNote, stats: NostrNoteStats) {

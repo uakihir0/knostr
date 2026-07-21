@@ -19,7 +19,6 @@ import work.socialhub.knostr.social.NostrSocialConfig
 import work.socialhub.knostr.social.api.EnrichmentResource
 import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.model.NostrNote
-import work.socialhub.knostr.social.model.NostrNoteStats
 import work.socialhub.knostr.social.model.NostrUser
 import work.socialhub.knostr.social.model.SocialDataBatch
 import work.socialhub.knostr.social.model.SocialDataRequest
@@ -29,6 +28,17 @@ class EnrichmentResourceImpl(
     private val cache: SocialCache,
     private val config: NostrSocialConfig,
 ) : EnrichmentResource {
+    private data class StatsFetchResult(
+        val events: List<NostrEvent> = listOf(),
+        val isComplete: Boolean = false,
+    )
+
+    private data class FetchResult(
+        val users: List<NostrUser> = listOf(),
+        val notes: List<NostrNote> = listOf(),
+        val stats: StatsFetchResult = StatsFetchResult(),
+    )
+
     override var onUpdateCallback: ((SocialDataBatch) -> Unit)? = null
 
     private val pendingUsers = mutableSetOf<String>()
@@ -85,6 +95,7 @@ class EnrichmentResourceImpl(
         val remainingUsers = request.userPubkeys.toMutableSet()
         val remainingNotes = request.noteIds.toMutableSet()
         val remainingStats = request.noteStatsEventIds.toMutableSet()
+        val accumulatedStatsEvents = mutableMapOf<String, NostrEvent>()
 
         if (!forceRefresh) {
             val cached = cacheGet(request)
@@ -106,10 +117,23 @@ class EnrichmentResourceImpl(
             }
             if (retryDelay > 0) delay(retryDelay)
 
-            val batch = fetch(
+            val fetched = fetch(
                 userPubkeys = remainingUsers.toList(),
                 noteIds = remainingNotes.toList(),
                 statsEventIds = remainingStats.toList(),
+            )
+            fetched.stats.events.forEach { accumulatedStatsEvents[it.id] = it }
+            val stats = if (fetched.stats.isComplete) {
+                remainingStats.map { eventId ->
+                    SocialStats.calculate(eventId, accumulatedStatsEvents.values)
+                }
+            } else {
+                listOf()
+            }
+            val batch = SocialDataBatch(
+                users = fetched.users,
+                notes = fetched.notes,
+                noteStats = stats,
             )
             if (!batch.isEmpty()) {
                 emit(batch, writeToCache = true)
@@ -125,14 +149,14 @@ class EnrichmentResourceImpl(
         userPubkeys: List<String>,
         noteIds: List<String>,
         statsEventIds: List<String>,
-    ): SocialDataBatch = supervisorScope {
+    ): FetchResult = supervisorScope {
         val users = async { fetchUsers(userPubkeys) }
         val notes = async { fetchNotes(noteIds) }
         val stats = async { fetchStats(statsEventIds) }
-        SocialDataBatch(
+        FetchResult(
             users = users.await(),
             notes = notes.await(),
-            noteStats = stats.await(),
+            stats = stats.await(),
         )
     }
 
@@ -168,52 +192,17 @@ class EnrichmentResourceImpl(
         }
     }
 
-    private suspend fun fetchStats(eventIds: List<String>): List<NostrNoteStats> {
-        if (eventIds.isEmpty()) return listOf()
+    private suspend fun fetchStats(eventIds: List<String>): StatsFetchResult {
+        if (eventIds.isEmpty()) return StatsFetchResult(isComplete = true)
         return try {
-            val response = nostr.events().queryEvents(
-                listOf(
-                    NostrFilter(
-                        kinds = listOf(
-                            EventKind.TEXT_NOTE,
-                            EventKind.REPOST,
-                            EventKind.GENERIC_REPOST,
-                            EventKind.REACTION,
-                        ),
-                        eTags = eventIds,
-                    )
-                )
+            val response = nostr.events().queryEvents(SocialStats.filters(eventIds))
+            StatsFetchResult(
+                events = response.data,
+                isComplete = response.isComplete,
             )
-            if (!response.isComplete) return listOf()
-            eventIds.map { eventId -> calculateStats(eventId, response.data) }
         } catch (_: Exception) {
-            listOf()
+            StatsFetchResult()
         }
-    }
-
-    private fun calculateStats(eventId: String, events: List<NostrEvent>): NostrNoteStats {
-        return NostrNoteStats(
-            eventId = eventId,
-            likeCount = SocialMapper.countLikes(
-                events.filter {
-                    it.kind == EventKind.REACTION && SocialMapper.getReactionTarget(it) == eventId
-                }
-            ),
-            replyCount = events.count {
-                it.kind == EventKind.TEXT_NOTE && findReplyParent(it) == eventId
-            },
-            repostCount = events.count {
-                (it.kind == EventKind.REPOST || it.kind == EventKind.GENERIC_REPOST) &&
-                    it.tags.any { tag -> tag.size >= 2 && tag[0] == "e" && tag[1] == eventId }
-            },
-        )
-    }
-
-    private fun findReplyParent(event: NostrEvent): String? {
-        val eTags = event.tags.filter { it.size >= 2 && it[0] == "e" }
-        if (eTags.isEmpty()) return null
-        eTags.firstOrNull { it.size >= 4 && it[3] == "reply" }?.let { return it[1] }
-        return if (eTags.size == 1) eTags[0][1] else eTags.last()[1]
     }
 
     private suspend fun cacheGet(request: SocialDataRequest): SocialDataBatch {
