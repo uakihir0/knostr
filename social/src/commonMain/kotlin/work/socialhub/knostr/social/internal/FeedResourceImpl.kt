@@ -113,6 +113,7 @@ class FeedResourceImpl(
         val cached = cacheGet(SocialDataRequest(noteIds = listOf(eventId)))
             .notes.firstOrNull { it.event.id == eventId }
         if (cached != null) {
+            resolveQuotedNote(cached, visited)
             return Response(cached)
         }
 
@@ -126,19 +127,19 @@ class FeedResourceImpl(
         val note = SocialMapper.toNote(event)
         cachePut(SocialDataBatch(notes = listOf(note)))
 
-        // Resolve quoted note if q-tag present
-        if (note.quotedEventId != null) {
-            try {
-                val quotedResponse = getNoteInternal(note.quotedEventId!!, visited)
-                note.quotedNote = quotedResponse.data
-            } catch (_: Exception) {
-                enrichment.requestMissing(
-                    SocialDataRequest(noteIds = listOf(note.quotedEventId!!))
-                )
-            }
-        }
+        resolveQuotedNote(note, visited)
 
         return Response(note)
+    }
+
+    private suspend fun resolveQuotedNote(note: NostrNote, visited: MutableSet<String>) {
+        val quotedEventId = note.quotedEventId ?: return
+        if (note.quotedNote != null) return
+        try {
+            note.quotedNote = getNoteInternal(quotedEventId, visited).data
+        } catch (_: Exception) {
+            enrichment.requestMissing(SocialDataRequest(noteIds = listOf(quotedEventId)))
+        }
     }
 
     override suspend fun getUserFeed(pubkey: String, since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
