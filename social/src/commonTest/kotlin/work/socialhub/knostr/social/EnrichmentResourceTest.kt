@@ -18,10 +18,13 @@ import work.socialhub.knostr.signing.NostrSigner
 import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.internal.EnrichmentResourceImpl
 import work.socialhub.knostr.social.internal.FeedResourceImpl
+import work.socialhub.knostr.social.internal.SocialMapper
+import work.socialhub.knostr.social.model.NostrNoteStats
 import work.socialhub.knostr.social.model.SocialDataBatch
 import work.socialhub.knostr.social.model.SocialDataRequest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class EnrichmentResourceTest {
     private val pubkey = "1".repeat(64)
@@ -116,7 +119,7 @@ class EnrichmentResourceTest {
     @Test
     fun incompleteStatsAreRetriedBeforeNotification() = runBlocking {
         var statsQueries = 0
-        val reaction = NostrEvent(
+        val firstReaction = NostrEvent(
             id = "3".repeat(64),
             pubkey = pubkey,
             createdAt = 1,
@@ -125,10 +128,13 @@ class EnrichmentResourceTest {
             content = "+",
             sig = "",
         )
+        val secondReaction = firstReaction.copy(id = "5".repeat(64))
         val eventResource = fakeEvents { filter ->
             if (EventKind.REACTION in (filter.kinds ?: listOf())) {
                 statsQueries++
-                Response(listOf(reaction)).also { it.isComplete = statsQueries > 1 }
+                Response(
+                    if (statsQueries == 1) listOf(firstReaction) else listOf(secondReaction)
+                ).also { it.isComplete = statsQueries > 1 }
             } else {
                 Response(listOf())
             }
@@ -150,7 +156,135 @@ class EnrichmentResourceTest {
         val stats = withTimeout(2_000) { update.await() }.noteStats.single()
 
         assertEquals(2, statsQueries)
-        assertEquals(1, stats.likeCount)
+        assertEquals(2, stats.likeCount)
+        enrichment.close()
+    }
+
+    @Test
+    fun incompleteStatsDoNotReplaceFreshCachedCounts() = runBlocking {
+        val note = textNote(noteId, pubkey)
+        val partialReaction = NostrEvent(
+            id = "6".repeat(64),
+            pubkey = pubkey,
+            createdAt = 2,
+            kind = EventKind.REACTION,
+            tags = listOf(listOf("e", noteId)),
+            content = "+",
+            sig = "",
+        )
+        val eventResource = fakeEvents { filter ->
+            when (filter.kinds) {
+                listOf(EventKind.TEXT_NOTE) -> Response(listOf(note))
+                listOf(EventKind.METADATA) -> Response(listOf(metadata(pubkey, "alice")))
+                listOf(EventKind.REACTION) -> Response(listOf(partialReaction)).also {
+                    it.isComplete = false
+                }
+                else -> Response(listOf())
+            }
+        }
+        val cache = RecordingCache(
+            SocialDataBatch(
+                noteStats = listOf(
+                    NostrNoteStats(
+                        eventId = noteId,
+                        likeCount = 7,
+                        replyCount = 8,
+                        repostCount = 9,
+                    )
+                )
+            )
+        )
+        val nostr = fakeNostr(eventResource)
+        val enrichment = EnrichmentResourceImpl(nostr, cache, config())
+        val feed = FeedResourceImpl(nostr, config(), cache, enrichment)
+
+        val returned = feed.getUserFeed(pubkey).data.single()
+
+        assertEquals(7, returned.likeCount)
+        assertEquals(8, returned.replyCount)
+        assertEquals(9, returned.repostCount)
+        enrichment.close()
+    }
+
+    @Test
+    fun statisticsQueriesUseSeparateUnlimitedFilters() = runBlocking {
+        val note = textNote(noteId, pubkey)
+        val reactions = (1..250).map { index ->
+            NostrEvent(
+                id = index.toString(16).padStart(64, '0'),
+                pubkey = pubkey,
+                createdAt = index.toLong(),
+                kind = EventKind.REACTION,
+                tags = listOf(listOf("e", noteId)),
+                content = "+",
+                sig = "",
+            )
+        }
+        val replies = (251..290).map { index ->
+            NostrEvent(
+                id = index.toString(16).padStart(64, '0'),
+                pubkey = pubkey,
+                createdAt = index.toLong(),
+                kind = EventKind.TEXT_NOTE,
+                tags = listOf(listOf("e", noteId, "", "reply")),
+                content = "reply",
+                sig = "",
+            )
+        }
+        val reposts = (291..320).map { index ->
+            NostrEvent(
+                id = index.toString(16).padStart(64, '0'),
+                pubkey = pubkey,
+                createdAt = index.toLong(),
+                kind = EventKind.REPOST,
+                tags = listOf(listOf("e", noteId)),
+                content = "",
+                sig = "",
+            )
+        }
+        var statsFilters: List<NostrFilter> = listOf()
+        val eventResource = fakeEventsForFilters { filters ->
+            when {
+                filters.size == 3 -> {
+                    statsFilters = filters
+                    Response(reactions + replies + reposts)
+                }
+                filters.single().kinds == listOf(EventKind.TEXT_NOTE) -> Response(listOf(note))
+                filters.single().kinds == listOf(EventKind.METADATA) ->
+                    Response(listOf(metadata(pubkey, "alice")))
+                else -> Response(listOf())
+            }
+        }
+        val nostr = fakeNostr(eventResource)
+        val cache = RecordingCache()
+        val enrichment = EnrichmentResourceImpl(nostr, cache, config())
+        val feed = FeedResourceImpl(nostr, config(), cache, enrichment)
+
+        val returned = feed.getUserFeed(pubkey).data.single()
+
+        assertEquals(3, statsFilters.size)
+        assertTrue(statsFilters.all { it.limit == null })
+        assertEquals(250, returned.likeCount)
+        assertEquals(40, returned.replyCount)
+        assertEquals(30, returned.repostCount)
+        enrichment.close()
+    }
+
+    @Test
+    fun cachedNoteStillResolvesItsQuotedNote() = runBlocking {
+        val quotedId = "7".repeat(64)
+        val root = SocialMapper.toNote(
+            textNote(noteId, pubkey).copy(tags = listOf(listOf("q", quotedId)))
+        )
+        val quoted = SocialMapper.toNote(textNote(quotedId, pubkey))
+        val cache = RecordingCache(SocialDataBatch(notes = listOf(root, quoted)))
+        val nostr = fakeNostr(fakeEvents { Response(listOf()) })
+        val enrichment = EnrichmentResourceImpl(nostr, cache, config())
+        val feed = FeedResourceImpl(nostr, config(), cache, enrichment)
+
+        val returned = feed.getNote(noteId).data
+
+        assertEquals(quotedId, returned.quotedNote?.event?.id)
         enrichment.close()
     }
 
@@ -270,8 +404,13 @@ class EnrichmentResourceTest {
     )
 
     private fun fakeEvents(query: suspend (NostrFilter) -> Response<List<NostrEvent>>) =
+        fakeEventsForFilters { filters -> query(filters.first()) }
+
+    private fun fakeEventsForFilters(
+        query: suspend (List<NostrFilter>) -> Response<List<NostrEvent>>,
+    ) =
         object : EventResource {
-            override suspend fun queryEvents(filters: List<NostrFilter>) = query(filters.first())
+            override suspend fun queryEvents(filters: List<NostrFilter>) = query(filters)
             override suspend fun publishEvent(event: NostrEvent) = Response(true)
             override suspend fun deleteEvent(eventId: String, reason: String) = Response(true)
             override fun queryEventsBlocking(filters: List<NostrFilter>) = runBlocking {
