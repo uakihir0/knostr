@@ -46,7 +46,14 @@ class SearchResourceImpl(
             .sortedByDescending { it.createdAt }
             .distinctBy { it.pubkey }
             .map { SocialMapper.toUser(it) }
-        cachePut(SocialDataBatch(users = newestUsers))
+        if (response.isComplete) {
+            cachePut(SocialDataBatch(users = newestUsers))
+        } else {
+            enrichment.request(
+                SocialDataRequest(userPubkeys = newestUsers.map { it.pubkey }),
+                forceRefresh = true,
+            )
+        }
         return response.withData(users)
     }
 

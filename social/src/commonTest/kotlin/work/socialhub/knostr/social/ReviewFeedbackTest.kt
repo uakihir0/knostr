@@ -103,6 +103,47 @@ class ReviewFeedbackTest {
     }
 
     @Test
+    fun incompleteUserSearchIsNotCachedAndQueuesRefresh() = runBlocking {
+        val releaseRefresh = CompletableDeferred<Unit>()
+        val cache = RecordingCache()
+        val events = fakeEvents(
+            query = { filters ->
+                if (filters.single().search != null) {
+                    Response(listOf(metadata(createdAt = 1, name = "old"))).also {
+                        it.isComplete = false
+                    }
+                } else {
+                    releaseRefresh.await()
+                    Response(listOf(metadata(createdAt = 2, name = "new")))
+                }
+            },
+        )
+        val nostr = fakeNostr(events)
+        val config = NostrSocialConfig().apply {
+            deferredEnrichmentInitialDelayMs = 0
+            deferredEnrichmentMaxAttempts = 1
+        }
+        val enrichment = EnrichmentResourceImpl(nostr, cache, config)
+        val refreshed = CompletableDeferred<SocialDataBatch>()
+        enrichment.onUpdateCallback = { batch ->
+            if (batch.users.singleOrNull()?.name == "new") {
+                refreshed.complete(batch)
+            }
+        }
+        val search = SearchResourceImpl(nostr, config, cache, enrichment)
+
+        val response = search.searchUsers("founder", limit = 10)
+
+        assertEquals("old", response.data.single().name)
+        assertFalse(response.isComplete)
+        assertEquals(0, cache.putCalls)
+        releaseRefresh.complete(Unit)
+        assertEquals("new", withTimeout(2_000) { refreshed.await() }.users.single().name)
+        assertEquals("new", cache.stored.users.single().name)
+        enrichment.close()
+    }
+
+    @Test
     fun incompleteProfileQueryIsNotCachedAndQueuesRefresh() = runBlocking {
         var queries = 0
         val cache = RecordingCache()
