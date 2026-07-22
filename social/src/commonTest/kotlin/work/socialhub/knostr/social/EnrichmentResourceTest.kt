@@ -2,10 +2,13 @@ package work.socialhub.knostr.social
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import work.socialhub.knostr.EventKind
@@ -531,6 +534,57 @@ class EnrichmentResourceTest {
         val batch = withTimeout(2_000) { update.await() }
 
         assertEquals("second-cycle", batch.users.single().name)
+        enrichment.close()
+    }
+
+    @Test
+    fun cancelPendingWaitsForCanceledWorkBeforeReuse() = runBlocking {
+        val cacheReadStarted = CompletableDeferred<Unit>()
+        val cancellationCleanupStarted = CompletableDeferred<Unit>()
+        val finishCancellationCleanup = CompletableDeferred<Unit>()
+        var cacheReads = 0
+        val cachedUser = SocialMapper.toUser(metadata(pubkey, "fresh"))
+        val cache = object : SocialCache {
+            override suspend fun get(request: SocialDataRequest): SocialDataBatch {
+                cacheReads++
+                if (cacheReads == 1) {
+                    cacheReadStarted.complete(Unit)
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        withContext(NonCancellable) {
+                            cancellationCleanupStarted.complete(Unit)
+                            finishCancellationCleanup.await()
+                        }
+                    }
+                }
+                return SocialDataBatch(users = listOf(cachedUser))
+            }
+
+            override suspend fun put(batch: SocialDataBatch) = Unit
+            override suspend fun remove(request: SocialDataRequest) = Unit
+        }
+        val enrichment = EnrichmentResourceImpl(
+            fakeNostr(fakeEvents { Response(listOf()) }),
+            cache,
+            config(),
+        )
+
+        enrichment.request(SocialDataRequest(userPubkeys = listOf(pubkey)), forceRefresh = false)
+        withTimeout(2_000) { cacheReadStarted.await() }
+        val cancellation = async { enrichment.cancelPending() }
+        withTimeout(2_000) { cancellationCleanupStarted.await() }
+        assertFalse(cancellation.isCompleted)
+        finishCancellationCleanup.complete(Unit)
+        withTimeout(2_000) { cancellation.await() }
+
+        val update = CompletableDeferred<SocialDataBatch>()
+        enrichment.onUpdateCallback = { batch ->
+            if (batch.users.isNotEmpty()) update.complete(batch)
+        }
+        enrichment.request(SocialDataRequest(userPubkeys = listOf(pubkey)), forceRefresh = false)
+
+        assertEquals("fresh", withTimeout(2_000) { update.await() }.users.single().name)
         enrichment.close()
     }
 
