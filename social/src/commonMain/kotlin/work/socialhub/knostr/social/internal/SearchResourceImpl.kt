@@ -59,27 +59,20 @@ class SearchResourceImpl(
 
     private suspend fun enrichNotes(notes: List<NostrNote>) {
         if (notes.isEmpty()) return
-        val pubkeys = notes.map { it.event.pubkey }.distinct()
+        val topLevelPubkeys = notes.map { it.event.pubkey }.distinct()
         val quoteIds = notes.mapNotNull { it.quotedEventId }.distinct()
         val eventIds = notes.map { it.event.id }
-        val cached = try {
-            socialCache.get(
-                SocialDataRequest(
-                    userPubkeys = pubkeys,
-                    noteIds = quoteIds,
-                    noteStatsEventIds = eventIds,
-                )
+        val cached = cacheGet(
+            SocialDataRequest(
+                userPubkeys = topLevelPubkeys,
+                noteIds = quoteIds,
+                noteStatsEventIds = eventIds,
             )
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Exception) {
-            SocialDataBatch()
-        }
-        val users = cached.users.associateBy { it.pubkey }
+        )
+        val users = cached.users.associateByTo(mutableMapOf()) { it.pubkey }
         val quotes = cached.notes.associateBy { it.event.id }
         val stats = cached.noteStats.associateBy { it.eventId }
         notes.forEach { note ->
-            note.author = users[note.event.pubkey]
             note.quotedNote = note.quotedEventId?.let { quotes[it] }
             stats[note.event.id]?.let {
                 note.likeCount = it.likeCount
@@ -87,13 +80,54 @@ class SearchResourceImpl(
                 note.repostCount = it.repostCount
             }
         }
+
+        val noteGraph = mutableListOf<NostrNote>()
+        val seenNoteIds = mutableSetOf<String>()
+        fun collect(note: NostrNote?) {
+            if (note == null || !seenNoteIds.add(note.event.id)) return
+            noteGraph.add(note)
+            collect(note.quotedNote)
+        }
+        notes.forEach { collect(it) }
+
+        val uncachedPubkeys = noteGraph
+            .filter { it.author == null }
+            .map { it.event.pubkey }
+            .distinct()
+            .filter { it !in users }
+        if (uncachedPubkeys.isNotEmpty()) {
+            cacheGet(SocialDataRequest(userPubkeys = uncachedPubkeys))
+                .users
+                .forEach { users[it.pubkey] = it }
+        }
+        noteGraph.forEach { note ->
+            users[note.event.pubkey]?.let { note.author = it }
+        }
+
+        val missingPubkeys = noteGraph
+            .filter { it.author == null }
+            .map { it.event.pubkey }
+            .distinct()
+        val missingQuoteIds = noteGraph
+            .mapNotNull { note -> note.quotedEventId?.takeIf { note.quotedNote == null } }
+            .distinct()
         enrichment.requestMissing(
             SocialDataRequest(
-                userPubkeys = pubkeys.filter { it !in users },
-                noteIds = quoteIds.filter { it !in quotes },
+                userPubkeys = missingPubkeys,
+                noteIds = missingQuoteIds,
                 noteStatsEventIds = eventIds.filter { it !in stats },
             )
         )
+    }
+
+    private suspend fun cacheGet(request: SocialDataRequest): SocialDataBatch {
+        return try {
+            socialCache.get(request)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            SocialDataBatch()
+        }
     }
 
     private suspend fun cachePut(batch: SocialDataBatch) {
