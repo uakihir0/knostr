@@ -73,6 +73,44 @@ class EnrichmentResourceTest {
     }
 
     @Test
+    fun incompleteUserResponseIsRetriedBeforeNotificationAndCache() = runBlocking {
+        var metadataQueries = 0
+        val eventResource = fakeEvents { filter ->
+            if (filter.kinds == listOf(EventKind.METADATA)) {
+                metadataQueries++
+                if (metadataQueries == 1) {
+                    Response(listOf(metadata(pubkey, "old"))).also {
+                        it.isComplete = false
+                    }
+                } else {
+                    Response(listOf(metadata(pubkey, "new")))
+                }
+            } else {
+                Response(listOf())
+            }
+        }
+        val cache = RecordingCache()
+        val enrichment = EnrichmentResourceImpl(fakeNostr(eventResource), cache, config())
+        val updates = mutableListOf<String>()
+        val update = CompletableDeferred<SocialDataBatch>()
+        enrichment.onUpdateCallback = { batch ->
+            batch.users.singleOrNull()?.name?.let {
+                updates.add(it)
+                update.complete(batch)
+            }
+        }
+
+        enrichment.request(SocialDataRequest(userPubkeys = listOf(pubkey)), forceRefresh = true)
+        val batch = withTimeout(2_000) { update.await() }
+
+        assertEquals(2, metadataQueries)
+        assertEquals(listOf("new"), updates)
+        assertEquals("new", batch.users.single().name)
+        assertEquals("new", cache.stored.users.single().name)
+        enrichment.close()
+    }
+
+    @Test
     fun nonForcedRequestUsesCacheWithoutRelayQuery() = runBlocking {
         var queries = 0
         val eventResource = fakeEvents {

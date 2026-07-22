@@ -35,8 +35,13 @@ class EnrichmentResourceImpl(
         val isComplete: Boolean = false,
     )
 
-    private data class FetchResult(
+    private data class UserFetchResult(
         val users: List<NostrUser> = listOf(),
+        val isComplete: Boolean = false,
+    )
+
+    private data class FetchResult(
+        val users: UserFetchResult = UserFetchResult(),
         val notes: List<NostrNote> = listOf(),
         val stats: StatsFetchResult = StatsFetchResult(),
     )
@@ -168,7 +173,7 @@ class EnrichmentResourceImpl(
                 listOf()
             }
             val batch = SocialDataBatch(
-                users = fetched.users,
+                users = if (fetched.users.isComplete) fetched.users.users else listOf(),
                 notes = fetched.notes,
                 noteStats = stats,
             )
@@ -241,20 +246,23 @@ class EnrichmentResourceImpl(
         )
     }
 
-    private suspend fun fetchUsers(pubkeys: List<String>): List<NostrUser> {
-        if (pubkeys.isEmpty()) return listOf()
+    private suspend fun fetchUsers(pubkeys: List<String>): UserFetchResult {
+        if (pubkeys.isEmpty()) return UserFetchResult(isComplete = true)
         return try {
             val response = nostr.events().queryEvents(
                 listOf(NostrFilter(authors = pubkeys, kinds = listOf(EventKind.METADATA)))
             )
-            response.data
-                .sortedByDescending { it.createdAt }
-                .distinctBy { it.pubkey }
-                .map { SocialMapper.toUser(it) }
+            UserFetchResult(
+                users = response.data
+                    .sortedByDescending { it.createdAt }
+                    .distinctBy { it.pubkey }
+                    .map { SocialMapper.toUser(it) },
+                isComplete = response.isComplete,
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
-            listOf()
+            UserFetchResult()
         }
     }
 
