@@ -9,6 +9,7 @@ import work.socialhub.knostr.social.model.NostrNoteStats
 import work.socialhub.knostr.social.model.NostrUser
 import work.socialhub.knostr.social.model.SocialDataBatch
 import work.socialhub.knostr.social.model.SocialDataRequest
+import work.socialhub.knostr.util.toBlocking
 import kotlin.time.Clock
 
 class MemorySocialCache(
@@ -54,6 +55,14 @@ class MemorySocialCache(
             evictIfNeeded(notes)
             evictIfNeeded(noteStats)
         }
+    }
+
+    override fun getBlocking(request: SocialDataRequest): SocialDataBatch {
+        return toBlocking { get(request) }
+    }
+
+    override fun putBlocking(batch: SocialDataBatch) {
+        toBlocking { put(batch) }
     }
 
     internal suspend fun getStaleUsers(pubkeys: List<String>): List<NostrUser> {
