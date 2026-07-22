@@ -83,6 +83,47 @@ class EnrichmentResourceTest {
     }
 
     @Test
+    fun forceRefreshUpgradesPendingCacheFirstRequest() = runBlocking {
+        var queries = 0
+        val cacheReadStarted = CompletableDeferred<Unit>()
+        val releaseCacheRead = CompletableDeferred<Unit>()
+        val cachedUser = SocialMapper.toUser(metadata(pubkey, "cached"))
+        val cache = object : SocialCache {
+            override suspend fun get(request: SocialDataRequest): SocialDataBatch {
+                cacheReadStarted.complete(Unit)
+                releaseCacheRead.await()
+                return SocialDataBatch(users = listOf(cachedUser))
+            }
+
+            override suspend fun put(batch: SocialDataBatch) = Unit
+        }
+        val eventResource = fakeEvents { filter ->
+            if (filter.kinds == listOf(EventKind.METADATA)) {
+                queries++
+                Response(listOf(metadata(pubkey, "fresh")))
+            } else {
+                Response(listOf())
+            }
+        }
+        val enrichment = EnrichmentResourceImpl(fakeNostr(eventResource), cache, config())
+        val freshUpdate = CompletableDeferred<SocialDataBatch>()
+        enrichment.onUpdateCallback = { batch ->
+            if (batch.users.singleOrNull()?.name == "fresh") freshUpdate.complete(batch)
+        }
+
+        val request = SocialDataRequest(userPubkeys = listOf(pubkey))
+        enrichment.request(request, forceRefresh = false)
+        withTimeout(2_000) { cacheReadStarted.await() }
+        enrichment.request(request, forceRefresh = true)
+        releaseCacheRead.complete(Unit)
+        val batch = withTimeout(2_000) { freshUpdate.await() }
+
+        assertEquals(1, queries)
+        assertEquals("fresh", batch.users.single().name)
+        enrichment.close()
+    }
+
+    @Test
     fun feedKeepsPlaceholderAndPublishesLaterProfile() = runBlocking {
         var metadataQueries = 0
         val note = textNote(noteId, pubkey)

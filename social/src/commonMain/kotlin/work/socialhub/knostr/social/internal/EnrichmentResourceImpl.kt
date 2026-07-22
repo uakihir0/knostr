@@ -1,6 +1,7 @@
 package work.socialhub.knostr.social.internal
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -22,6 +23,7 @@ import work.socialhub.knostr.social.model.NostrNote
 import work.socialhub.knostr.social.model.NostrUser
 import work.socialhub.knostr.social.model.SocialDataBatch
 import work.socialhub.knostr.social.model.SocialDataRequest
+import work.socialhub.knostr.util.toBlocking
 
 class EnrichmentResourceImpl(
     private val nostr: Nostr,
@@ -44,6 +46,9 @@ class EnrichmentResourceImpl(
     private val pendingUsers = mutableSetOf<String>()
     private val pendingNotes = mutableSetOf<String>()
     private val pendingStats = mutableSetOf<String>()
+    private val forceRefreshUsers = mutableSetOf<String>()
+    private val forceRefreshNotes = mutableSetOf<String>()
+    private val forceRefreshStats = mutableSetOf<String>()
     private val mutex = Mutex()
     private var scope: CoroutineScope? = newScope()
 
@@ -53,20 +58,38 @@ class EnrichmentResourceImpl(
         activeScope.launch {
             val uniqueRequest = mutex.withLock {
                 SocialDataRequest(
-                    userPubkeys = request.userPubkeys.distinct().filter { pendingUsers.add(it) },
-                    noteIds = request.noteIds.distinct().filter { pendingNotes.add(it) },
-                    noteStatsEventIds = request.noteStatsEventIds.distinct().filter { pendingStats.add(it) },
+                    userPubkeys = request.userPubkeys.distinct().filter {
+                        pendingUsers.add(it).also { added ->
+                            if (forceRefresh && !added) forceRefreshUsers.add(it)
+                        }
+                    },
+                    noteIds = request.noteIds.distinct().filter {
+                        pendingNotes.add(it).also { added ->
+                            if (forceRefresh && !added) forceRefreshNotes.add(it)
+                        }
+                    },
+                    noteStatsEventIds = request.noteStatsEventIds.distinct().filter {
+                        pendingStats.add(it).also { added ->
+                            if (forceRefresh && !added) forceRefreshStats.add(it)
+                        }
+                    },
                 )
             }
             if (uniqueRequest.isEmpty()) return@launch
 
+            var released = false
             try {
-                resolve(uniqueRequest, forceRefresh)
+                process(uniqueRequest, forceRefresh)
+                released = true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Unexpected failures must not escape the shared enrichment scope.
             } finally {
-                mutex.withLock {
-                    pendingUsers.removeAll(uniqueRequest.userPubkeys.toSet())
-                    pendingNotes.removeAll(uniqueRequest.noteIds.toSet())
-                    pendingStats.removeAll(uniqueRequest.noteStatsEventIds.toSet())
+                if (!released) {
+                    mutex.withLock {
+                        release(uniqueRequest)
+                    }
                 }
             }
         }
@@ -82,7 +105,14 @@ class EnrichmentResourceImpl(
             pendingUsers.clear()
             pendingNotes.clear()
             pendingStats.clear()
+            forceRefreshUsers.clear()
+            forceRefreshNotes.clear()
+            forceRefreshStats.clear()
         }
+    }
+
+    override fun cancelPendingBlocking() {
+        toBlocking { cancelPending() }
     }
 
     override fun close() {
@@ -143,6 +173,38 @@ class EnrichmentResourceImpl(
             }
             retryDelay = (retryDelay * multiplier).toLong()
         }
+    }
+
+    private suspend fun process(initialRequest: SocialDataRequest, forceRefresh: Boolean) {
+        var request = initialRequest
+        var shouldForceRefresh = forceRefresh
+        while (true) {
+            resolve(request, shouldForceRefresh)
+            val upgrade = mutex.withLock {
+                val next = SocialDataRequest(
+                    userPubkeys = initialRequest.userPubkeys.filter { forceRefreshUsers.remove(it) },
+                    noteIds = initialRequest.noteIds.filter { forceRefreshNotes.remove(it) },
+                    noteStatsEventIds = initialRequest.noteStatsEventIds.filter { forceRefreshStats.remove(it) },
+                )
+                if (next.isEmpty()) {
+                    release(initialRequest)
+                    null
+                } else {
+                    next
+                }
+            } ?: return
+            request = upgrade
+            shouldForceRefresh = true
+        }
+    }
+
+    private fun release(request: SocialDataRequest) {
+        pendingUsers.removeAll(request.userPubkeys.toSet())
+        pendingNotes.removeAll(request.noteIds.toSet())
+        pendingStats.removeAll(request.noteStatsEventIds.toSet())
+        forceRefreshUsers.removeAll(request.userPubkeys.toSet())
+        forceRefreshNotes.removeAll(request.noteIds.toSet())
+        forceRefreshStats.removeAll(request.noteStatsEventIds.toSet())
     }
 
     private suspend fun fetch(

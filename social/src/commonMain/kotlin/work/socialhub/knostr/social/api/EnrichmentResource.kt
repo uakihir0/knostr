@@ -15,6 +15,10 @@ interface EnrichmentResource {
     /** Cancel queued work while keeping this resource reusable. */
     suspend fun cancelPending()
 
+    /** Cancel queued work while keeping this resource reusable. */
+    @JsExport.Ignore
+    fun cancelPendingBlocking()
+
     /** Permanently stop background enrichment and release its callback. */
     fun close()
 }
