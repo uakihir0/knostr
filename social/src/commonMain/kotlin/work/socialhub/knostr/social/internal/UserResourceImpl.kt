@@ -48,12 +48,12 @@ class UserResourceImpl(
                 this.pubkey = pubkey
                 this.npub = Bech32.encode("npub", Hex.decode(pubkey))
             }
-            return Response(user)
+            return response.withData(user)
         }
 
         val user = SocialMapper.toUser(event)
         cachePut(SocialDataBatch(users = listOf(user)))
-        return Response(user)
+        return response.withData(user)
     }
 
     override suspend fun updateProfile(profile: NostrProfile): Response<NostrEvent> {
@@ -128,7 +128,7 @@ class UserResourceImpl(
             ?.let { SocialMapper.toFollowList(it) }
             ?: listOf()
 
-        return Response(followList)
+        return response.withData(followList)
     }
 
     override suspend fun getFollowers(pubkey: String, limit: Int): Response<List<String>> {
@@ -144,7 +144,7 @@ class UserResourceImpl(
             .sortedByDescending { it.createdAt }
             .distinctBy { it.pubkey }
             .map { it.pubkey }
-        return Response(followers)
+        return response.withData(followers)
     }
 
     override suspend fun getProfiles(pubkeys: List<String>): Response<List<NostrUser>> {
@@ -175,7 +175,7 @@ class UserResourceImpl(
         if (unresolved.isNotEmpty()) {
             enrichment.requestMissing(SocialDataRequest(userPubkeys = unresolved))
         }
-        return Response(uniquePubkeys.mapNotNull { cached[it] ?: fetchedByPubkey[it] })
+        return response.withData(uniquePubkeys.mapNotNull { cached[it] ?: fetchedByPubkey[it] })
     }
 
     override suspend fun verifyNip05(address: String): Response<Boolean> {
@@ -225,18 +225,20 @@ class UserResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
         val event = response.data.firstOrNull()
         if (event == null) {
-            return Response(null)
+            return response.withData(null)
         }
 
         val statusUrl = event.tags.firstOrNull { it.size >= 2 && it[0] == "r" }?.get(1)
         val expiration = event.tags.firstOrNull { it.size >= 2 && it[0] == "expiration" }?.get(1)?.toLongOrNull()
 
-        return Response(NostrUserStatus(
-            type = type,
-            content = event.content,
-            url = statusUrl,
-            expiration = expiration,
-        ))
+        return response.withData(
+            NostrUserStatus(
+                type = type,
+                content = event.content,
+                url = statusUrl,
+                expiration = expiration,
+            )
+        )
     }
 
     override suspend fun clearStatus(type: String): Response<NostrEvent> {
@@ -257,14 +259,17 @@ class UserResourceImpl(
         val myPubkey = signer?.getPublicKey()
 
         val relationship = NostrRelationship()
+        val sourceResponses = mutableListOf<Response<*>>()
 
         // Check if I'm following them
         if (myPubkey != null) {
             val followingResponse = getFollowing(myPubkey)
+            sourceResponses.add(followingResponse)
             relationship.isFollowing = followingResponse.data.contains(pubkey)
 
             // Check if they're following me by querying their follow list
             val theirFollowingResponse = getFollowing(pubkey)
+            sourceResponses.add(theirFollowingResponse)
             relationship.isFollowedBy = theirFollowingResponse.data.contains(myPubkey)
 
             // Check if I'm muting them (kind:10000)
@@ -274,13 +279,14 @@ class UserResourceImpl(
                 limit = 1,
             )
             val muteResponse = nostr.events().queryEvents(listOf(muteFilter))
+            sourceResponses.add(muteResponse)
             val mutedPubkeys = muteResponse.data.firstOrNull()
                 ?.let { SocialMapper.toFollowList(it) }
                 ?: listOf()
             relationship.isMuting = mutedPubkeys.contains(pubkey)
         }
 
-        return Response(relationship)
+        return responseOf(relationship, *sourceResponses.toTypedArray())
     }
 
     override suspend fun getFollowersWithProfiles(pubkey: String, limit: Int): Response<List<NostrUser>> {
@@ -288,10 +294,11 @@ class UserResourceImpl(
         val followerPubkeys = followersResponse.data
 
         if (followerPubkeys.isEmpty()) {
-            return Response(listOf())
+            return followersResponse.withData(listOf())
         }
 
-        return getProfiles(followerPubkeys)
+        val profilesResponse = getProfiles(followerPubkeys)
+        return responseOf(profilesResponse.data, followersResponse, profilesResponse)
     }
 
     private suspend fun getFollowingTags(pubkey: String): List<List<String>> {

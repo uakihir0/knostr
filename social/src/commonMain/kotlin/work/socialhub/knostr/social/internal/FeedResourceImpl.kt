@@ -32,7 +32,7 @@ class FeedResourceImpl(
     private var cachedFollowList: List<String>? = null
     private var followListCachedAt: Long = 0
 
-    private suspend fun getFollowPubkeys(): List<String> {
+    private suspend fun getFollowPubkeys(): Response<List<String>> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get home feed")
 
@@ -40,7 +40,7 @@ class FeedResourceImpl(
             val now = Clock.System.now().toEpochMilliseconds()
             val cached = cachedFollowList
             if (cached != null && (now - followListCachedAt) < config.followListCacheTtlMs) {
-                return cached
+                return Response(cached)
             }
         }
 
@@ -60,7 +60,7 @@ class FeedResourceImpl(
             followListCachedAt = Clock.System.now().toEpochMilliseconds()
         }
 
-        return pubkeys
+        return followResponse.withData(pubkeys)
     }
 
     fun invalidateFollowListCache() {
@@ -69,10 +69,11 @@ class FeedResourceImpl(
     }
 
     override suspend fun getHomeFeed(since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
-        val followPubkeys = getFollowPubkeys()
+        val followResponse = getFollowPubkeys()
+        val followPubkeys = followResponse.data
 
         if (followPubkeys.isEmpty()) {
-            return Response(listOf())
+            return followResponse.withData(listOf())
         }
 
         // Then, get posts from followed users
@@ -95,7 +96,7 @@ class FeedResourceImpl(
             populateLikeCounts(notes)
         }
 
-        return Response(notes)
+        return responseOf(notes, followResponse, feedResponse)
     }
 
     override suspend fun getNote(eventId: String): Response<NostrNote> {
@@ -130,7 +131,7 @@ class FeedResourceImpl(
 
         resolveQuotedNote(note, visited)
 
-        return Response(note)
+        return response.withData(note)
     }
 
     private suspend fun resolveQuotedNote(note: NostrNote, visited: MutableSet<String>) {
@@ -164,7 +165,7 @@ class FeedResourceImpl(
             populateAuthors(notes)
             populateLikeCounts(notes)
         }
-        return Response(notes)
+        return response.withData(notes)
     }
 
     override suspend fun getMentions(since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
@@ -189,11 +190,12 @@ class FeedResourceImpl(
             populateAuthors(notes)
             populateLikeCounts(notes)
         }
-        return Response(notes)
+        return response.withData(notes)
     }
 
     override suspend fun getThread(eventId: String): Response<NostrThread> {
         val thread = NostrThread()
+        val sourceResponses = mutableListOf<Response<*>>()
 
         // Fetch the target note
         val targetFilter = NostrFilter(
@@ -202,6 +204,7 @@ class FeedResourceImpl(
             limit = 1,
         )
         val targetResponse = nostr.events().queryEvents(listOf(targetFilter))
+        sourceResponses.add(targetResponse)
         val targetEvent = targetResponse.data.firstOrNull()
             ?: throw NostrException("Note not found: $eventId")
 
@@ -223,6 +226,7 @@ class FeedResourceImpl(
                 limit = 1,
             )
             val parentResponse = nostr.events().queryEvents(listOf(parentFilter))
+            sourceResponses.add(parentResponse)
             val parentEvent = parentResponse.data.firstOrNull() ?: break
             ancestors.add(0, SocialMapper.toNote(parentEvent))
             currentEvent = parentEvent
@@ -235,6 +239,7 @@ class FeedResourceImpl(
             limit = 100,
         )
         val replyResponse = nostr.events().queryEvents(listOf(replyFilter))
+        sourceResponses.add(replyResponse)
         val descendants = replyResponse.data
             .filter { it.id != eventId }
             .map { SocialMapper.toNote(it) }
@@ -248,7 +253,7 @@ class FeedResourceImpl(
             populateAuthors(allNotes)
             populateLikeCounts(allNotes)
         }
-        return Response(thread)
+        return responseOf(thread, *sourceResponses.toTypedArray())
     }
 
     /** Extract the parent event ID from NIP-10 e-tags */
@@ -593,12 +598,9 @@ class FeedResourceImpl(
         )
         val reactionResponse = nostr.events().queryEvents(listOf(reactionFilter))
 
-        // Filter only likes (empty content, "+", or heart) and extract target event IDs
+        // Filter only NIP-25 likes and extract target event IDs
         val targetEventIds = reactionResponse.data
-            .filter { event ->
-                val content = event.content.trim()
-                content.isEmpty() || content == "+" || content == "\u2764\ufe0f" || content == "\u2764"
-            }
+            .filter { event -> SocialMapper.isLike(event.content) }
             .mapNotNull { event ->
                 event.tags.lastOrNull { it.size >= 2 && it[0] == "e" }?.get(1)
             }
@@ -606,7 +608,7 @@ class FeedResourceImpl(
             .take(limit)
 
         if (targetEventIds.isEmpty()) {
-            return Response(listOf())
+            return reactionResponse.withData(listOf())
         }
 
         // Fetch the actual notes
@@ -627,7 +629,7 @@ class FeedResourceImpl(
             populateLikeCounts(notes)
         }
 
-        return Response(notes)
+        return responseOf(notes, reactionResponse, noteResponse)
     }
 
     override suspend fun getUserMediaFeed(pubkey: String, since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
@@ -660,7 +662,7 @@ class FeedResourceImpl(
             populateLikeCounts(mediaNotes)
         }
 
-        return Response(mediaNotes)
+        return response.withData(mediaNotes)
     }
 
     override suspend fun getNoteByNpub(noteId: String): Response<NostrNote> {

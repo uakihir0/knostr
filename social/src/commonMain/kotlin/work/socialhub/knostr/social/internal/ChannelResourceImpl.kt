@@ -101,7 +101,7 @@ class ChannelResourceImpl(
                 this.createdAt = event.createdAt
             }
         }.sortedBy { it.createdAt }
-        return Response(messages)
+        return response.withData(messages)
     }
 
     override suspend fun getChannel(channelId: String): Response<NostrChannel> {
@@ -137,7 +137,7 @@ class ChannelResourceImpl(
             }
         }
 
-        return Response(channel)
+        return responseOf(channel, createResponse, metaResponse)
     }
 
     override suspend fun getChannels(limit: Int): Response<List<NostrChannel>> {
@@ -147,7 +147,7 @@ class ChannelResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val channels = response.data.map { parseChannelFromEvent(it) }
-        return Response(channels)
+        return response.withData(channels)
     }
 
     private fun parseChannelFromEvent(event: NostrEvent): NostrChannel {
@@ -200,18 +200,19 @@ class ChannelResourceImpl(
     // NIP-51 Public Chats List (kind:10005)
 
     override suspend fun getJoinedChannels(): Response<List<String>> {
-        val tags = getPublicChatsListTags()
+        val response = getPublicChatsListTags()
+        val tags = response.data
         val channelIds = tags
             .filter { it.size >= 2 && it[0] == "e" }
             .map { it[1] }
-        return Response(channelIds)
+        return response.withData(channelIds)
     }
 
     override suspend fun joinChannel(channelId: String): Response<NostrEvent> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to join channel")
 
-        val currentTags = getPublicChatsListTags()
+        val currentTags = getPublicChatsListTags().data
         val tags = currentTags.toMutableList()
         if (tags.none { it.size >= 2 && it[0] == "e" && it[1] == channelId }) {
             tags.add(listOf("e", channelId))
@@ -224,13 +225,13 @@ class ChannelResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to leave channel")
 
-        val currentTags = getPublicChatsListTags()
+        val currentTags = getPublicChatsListTags().data
         val tags = currentTags.filter { !(it.size >= 2 && it[0] == "e" && it[1] == channelId) }
 
         return publishPublicChatsList(signer, tags)
     }
 
-    private suspend fun getPublicChatsListTags(): List<List<String>> {
+    private suspend fun getPublicChatsListTags(): Response<List<List<String>>> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get public chats list")
 
@@ -240,7 +241,7 @@ class ChannelResourceImpl(
             limit = 1,
         )
         val response = nostr.events().queryEvents(listOf(filter))
-        return response.data.firstOrNull()?.tags ?: listOf()
+        return response.withData(response.data.firstOrNull()?.tags ?: listOf())
     }
 
     private suspend fun publishPublicChatsList(

@@ -73,7 +73,7 @@ class PollResourceImpl(
         val event = response.data.firstOrNull()
             ?: throw NostrException("Poll not found: $pollEventId")
 
-        return Response(toPoll(event))
+        return response.withData(toPoll(event))
     }
 
     override suspend fun getPollVotes(pollEventId: String): Response<Map<Int, Int>> {
@@ -98,7 +98,7 @@ class PollResourceImpl(
             }
         }
 
-        return Response(counts)
+        return response.withData(counts)
     }
 
     private fun toPoll(event: NostrEvent): NostrPoll {

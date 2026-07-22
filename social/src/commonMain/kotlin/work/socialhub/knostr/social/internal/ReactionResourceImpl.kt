@@ -65,7 +65,7 @@ internal class ReactionResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
         val reactions = response.data.map { SocialMapper.toReaction(it) }
         populateAuthors(reactions)
-        return Response(reactions)
+        return response.withData(reactions)
     }
 
     override suspend fun unlike(eventId: String): Response<Boolean> {
@@ -107,7 +107,7 @@ internal class ReactionResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
         val reactions = response.data.map { SocialMapper.toReaction(it) }
         populateAuthors(reactions)
-        return Response(reactions)
+        return response.withData(reactions)
     }
 
     private suspend fun populateAuthors(reactions: List<NostrReaction>) {

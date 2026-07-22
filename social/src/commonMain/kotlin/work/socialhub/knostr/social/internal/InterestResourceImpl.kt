@@ -20,7 +20,7 @@ class InterestResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to follow hashtag")
 
-        val currentTags = getInterestTags()
+        val currentTags = getInterestTags().data
         val tags = currentTags.toMutableList()
         val normalized = hashtag.lowercase()
         if (tags.none { it.size >= 2 && it[0] == "t" && it[1] == normalized }) {
@@ -34,7 +34,7 @@ class InterestResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to unfollow hashtag")
 
-        val currentTags = getInterestTags()
+        val currentTags = getInterestTags().data
         val normalized = hashtag.lowercase()
         val tags = currentTags.filter { !(it.size >= 2 && it[0] == "t" && it[1] == normalized) }
 
@@ -42,14 +42,15 @@ class InterestResourceImpl(
     }
 
     override suspend fun getFollowedHashtags(): Response<List<String>> {
-        val tags = getInterestTags()
+        val response = getInterestTags()
+        val tags = response.data
         val hashtags = tags
             .filter { it.size >= 2 && it[0] == "t" }
             .map { it[1] }
-        return Response(hashtags)
+        return response.withData(hashtags)
     }
 
-    private suspend fun getInterestTags(): List<List<String>> {
+    private suspend fun getInterestTags(): Response<List<List<String>>> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get interest list")
 
@@ -59,7 +60,7 @@ class InterestResourceImpl(
             limit = 1,
         )
         val response = nostr.events().queryEvents(listOf(filter))
-        return response.data.firstOrNull()?.tags ?: listOf()
+        return response.withData(response.data.firstOrNull()?.tags ?: listOf())
     }
 
     private suspend fun publishInterestList(

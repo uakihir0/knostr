@@ -74,7 +74,7 @@ class ZapResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
         val zaps = response.data.mapNotNull { SocialMapper.toZap(it) }
         populateSenders(zaps)
-        return Response(zaps)
+        return response.withData(zaps)
     }
 
     override suspend fun getZapsForUser(pubkey: String, limit: Int): Response<List<NostrZap>> {
@@ -86,7 +86,7 @@ class ZapResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
         val zaps = response.data.mapNotNull { SocialMapper.toZap(it) }
         populateSenders(zaps)
-        return Response(zaps)
+        return response.withData(zaps)
     }
 
     private suspend fun populateSenders(zaps: List<NostrZap>) {

@@ -76,7 +76,7 @@ class ListResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
         val event = response.data.firstOrNull()
             ?: throw NostrException("List not found: $name")
-        return Response(toList(event))
+        return response.withData(toList(event))
     }
 
     override suspend fun getLists(): Response<List<NostrList>> {
@@ -95,7 +95,7 @@ class ListResourceImpl(
             .sortedByDescending { it.createdAt }
             .distinctBy { e -> e.tags.firstOrNull { it.size >= 2 && it[0] == "d" }?.get(1) }
             .map { toList(it) }
-        return Response(lists)
+        return response.withData(lists)
     }
 
     private suspend fun getListTags(name: String): List<List<String>> {

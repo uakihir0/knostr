@@ -31,7 +31,7 @@ class SearchResourceImpl(
         val notes = response.data.map { SocialMapper.toNote(it) }
         cachePut(SocialDataBatch(notes = notes))
         enrichNotes(notes)
-        return Response(notes)
+        return response.withData(notes)
     }
 
     override suspend fun searchUsers(query: String, limit: Int): Response<List<NostrUser>> {
@@ -43,7 +43,7 @@ class SearchResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
         val users = response.data.map { SocialMapper.toUser(it) }
         cachePut(SocialDataBatch(users = users))
-        return Response(users)
+        return response.withData(users)
     }
 
     private suspend fun enrichNotes(notes: List<NostrNote>) {

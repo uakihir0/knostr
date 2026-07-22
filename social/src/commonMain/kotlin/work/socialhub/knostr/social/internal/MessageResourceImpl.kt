@@ -80,7 +80,7 @@ class MessageResourceImpl(
             unwrapGiftWrap(giftWrap, signer)
         }.sortedByDescending { it.createdAt }
 
-        return Response(messages)
+        return response.withData(messages)
     }
 
     override suspend fun getConversation(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrDirectMessage>> {
@@ -88,7 +88,7 @@ class MessageResourceImpl(
         val filtered = response.data.filter {
             it.senderPubkey == pubkey || it.recipientPubkey == pubkey
         }
-        return Response(filtered)
+        return response.withData(filtered)
     }
 
     // --- Internal NIP-17 helpers ---
@@ -247,7 +247,7 @@ class MessageResourceImpl(
             decryptLegacyDm(event, signer, myPubkey)
         }.sortedByDescending { it.createdAt }
 
-        return Response(messages)
+        return response.withData(messages)
     }
 
     // --- Internal NIP-04 helpers ---
@@ -282,8 +282,10 @@ class MessageResourceImpl(
 
     override suspend fun getThreads(since: Long?, until: Long?, limit: Int): Response<List<NostrThread>> {
         // Fetch both NIP-17 gift-wrap DMs and NIP-04 legacy DMs
-        val giftWrapMessages = getMessages(since, until, limit * 2).data
-        val legacyMessages = getLegacyMessages(since, until, limit * 2).data
+        val giftWrapResponse = getMessages(since, until, limit * 2)
+        val legacyResponse = getLegacyMessages(since, until, limit * 2)
+        val giftWrapMessages = giftWrapResponse.data
+        val legacyMessages = legacyResponse.data
 
         // Combine and deduplicate by message ID
         val allMessages = (giftWrapMessages + legacyMessages)
@@ -292,7 +294,8 @@ class MessageResourceImpl(
 
         // Group by conversation partner (the other party in each DM)
         val signer = nostr.signer()
-        val myPubkey = signer?.getPublicKey() ?: return Response(listOf())
+        val myPubkey = signer?.getPublicKey()
+            ?: return responseOf(listOf(), giftWrapResponse, legacyResponse)
 
         val threadsByPartner = mutableMapOf<String, MutableList<NostrDirectMessage>>()
         for (msg in allMessages) {
@@ -316,7 +319,7 @@ class MessageResourceImpl(
                 }
             }
 
-        return Response(threads)
+        return responseOf(threads, giftWrapResponse, legacyResponse)
     }
 
     override fun sendMessageBlocking(recipientPubkey: String, content: String): Response<NostrEvent> {

@@ -108,7 +108,7 @@ class BadgeResourceImpl(
             .maxByOrNull { it.createdAt }
             ?: throw NostrException("Badge not found: $dTag")
 
-        return Response(parseBadgeFromEvent(event))
+        return response.withData(parseBadgeFromEvent(event))
     }
 
     override suspend fun getProfileBadges(pubkey: String): Response<List<NostrBadge>> {
@@ -119,7 +119,7 @@ class BadgeResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val profileEvent = response.data.firstOrNull()
-            ?: return Response(listOf())
+            ?: return response.withData(listOf())
 
         // Extract badge definition a-tags
         val aTags = profileEvent.tags
@@ -140,7 +140,7 @@ class BadgeResourceImpl(
             }
         }
 
-        return Response(badges)
+        return response.withData(badges)
     }
 
     private fun parseBadgeFromEvent(event: NostrEvent): NostrBadge {

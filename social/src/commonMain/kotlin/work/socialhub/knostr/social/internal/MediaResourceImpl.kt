@@ -175,7 +175,7 @@ class MediaResourceImpl(
         val event = response.data.firstOrNull { e ->
             e.tags.any { it.size >= 2 && it[0] == "url" && it[1] == url }
         }
-        if (event == null) return Response(null)
+        if (event == null) return response.withData(null)
 
         val metadata = NostrFileMetadata()
         metadata.event = event
@@ -194,7 +194,7 @@ class MediaResourceImpl(
                 "alt" -> if (metadata.description == null) metadata.description = tag[1]
             }
         }
-        return Response(metadata)
+        return response.withData(metadata)
     }
 
     private fun createHttpAuthEvent(url: String, method: String): work.socialhub.knostr.entity.NostrEvent {

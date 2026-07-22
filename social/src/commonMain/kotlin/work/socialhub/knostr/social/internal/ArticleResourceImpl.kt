@@ -73,7 +73,7 @@ class ArticleResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
         val event = response.data.firstOrNull()
             ?: throw NostrException("Article not found: $identifier")
-        return Response(toArticle(event))
+        return response.withData(toArticle(event))
     }
 
     override suspend fun getUserArticles(pubkey: String, since: Long?, until: Long?, limit: Int): Response<List<NostrArticle>> {
@@ -89,7 +89,7 @@ class ArticleResourceImpl(
             .sortedByDescending { it.createdAt }
             .distinctBy { e -> e.tags.firstOrNull { it.size >= 2 && it[0] == "d" }?.get(1) }
             .map { toArticle(it) }
-        return Response(articles)
+        return response.withData(articles)
     }
 
     override suspend fun deleteArticle(identifier: String, reason: String): Response<Boolean> {
