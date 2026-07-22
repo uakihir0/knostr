@@ -1,5 +1,6 @@
 package work.socialhub.knostr.social.stream
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -68,6 +69,8 @@ class NotificationStream(
                             onRepostCallback?.invoke(event)
                         }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     onErrorCallback?.invoke(e)
                 }
@@ -93,6 +96,8 @@ class NotificationStream(
             socialCache.get(SocialDataRequest(userPubkeys = listOf(pubkey)))
                 .users.firstOrNull { it.pubkey == pubkey }
                 ?.let { return it }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             // Fall through to relay lookup.
         }
@@ -110,11 +115,15 @@ class NotificationStream(
                 val user = SocialMapper.toUser(event)
                 try {
                     socialCache.put(SocialDataBatch(users = listOf(user)))
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (_: Exception) {
                     // A cache failure does not discard relay data.
                 }
                 return user
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             // Best-effort
         }

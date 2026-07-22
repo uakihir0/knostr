@@ -1,5 +1,6 @@
 package work.socialhub.knostr.social.internal
 
+import kotlinx.coroutines.CancellationException
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.NostrException
@@ -306,6 +307,8 @@ class UserResourceImpl(
     private suspend fun cacheGet(request: SocialDataRequest): SocialDataBatch {
         return try {
             socialCache.get(request)
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             SocialDataBatch()
         }
@@ -315,6 +318,8 @@ class UserResourceImpl(
         if (batch.isEmpty()) return
         try {
             socialCache.put(batch)
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             // Cache failures must not fail the API request.
         }

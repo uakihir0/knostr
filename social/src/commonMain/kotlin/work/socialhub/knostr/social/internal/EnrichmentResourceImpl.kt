@@ -236,6 +236,8 @@ class EnrichmentResourceImpl(
                 .sortedByDescending { it.createdAt }
                 .distinctBy { it.pubkey }
                 .map { SocialMapper.toUser(it) }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             listOf()
         }
@@ -253,6 +255,8 @@ class EnrichmentResourceImpl(
                 )
             )
             response.data.distinctBy { it.id }.map { SocialMapper.toNote(it) }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             listOf()
         }
@@ -266,6 +270,8 @@ class EnrichmentResourceImpl(
                 events = response.data,
                 isComplete = response.isComplete,
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             StatsFetchResult()
         }
@@ -274,6 +280,8 @@ class EnrichmentResourceImpl(
     private suspend fun cacheGet(request: SocialDataRequest): SocialDataBatch {
         return try {
             cache.get(request)
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             SocialDataBatch()
         }
@@ -284,12 +292,16 @@ class EnrichmentResourceImpl(
         if (writeToCache) {
             try {
                 cache.put(batch)
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 // Cache failures must not suppress successfully resolved data.
             }
         }
         try {
             onUpdateCallback?.invoke(batch)
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             // Client callback failures do not stop remaining enrichment work.
         }

@@ -1,5 +1,6 @@
 package work.socialhub.knostr.social.internal
 
+import kotlinx.coroutines.CancellationException
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.NostrException
@@ -137,6 +138,8 @@ class FeedResourceImpl(
         if (note.quotedNote != null) return
         try {
             note.quotedNote = getNoteInternal(quotedEventId, visited).data
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             enrichment.requestMissing(SocialDataRequest(noteIds = listOf(quotedEventId)))
         }
@@ -350,6 +353,8 @@ class FeedResourceImpl(
             try {
                 val retryResponse = nostr.events().queryEvents(listOf(retryFilter))
                 fetched.putAll(processMetadataEvents(retryResponse.data))
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 // Retry failed — proceed with what we have
             }
@@ -416,6 +421,8 @@ class FeedResourceImpl(
     private suspend fun cacheGet(request: SocialDataRequest): SocialDataBatch {
         return try {
             socialCache.get(request)
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             SocialDataBatch()
         }
@@ -425,6 +432,8 @@ class FeedResourceImpl(
         if (batch.isEmpty()) return
         try {
             socialCache.put(batch)
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             // Cache failures must not fail the API request.
         }
@@ -555,7 +564,22 @@ class FeedResourceImpl(
     }
 
     override suspend fun delete(eventId: String, reason: String): Response<Boolean> {
-        return nostr.events().deleteEvent(eventId, reason)
+        val response = nostr.events().deleteEvent(eventId, reason)
+        if (response.data) {
+            try {
+                socialCache.remove(
+                    SocialDataRequest(
+                        noteIds = listOf(eventId),
+                        noteStatsEventIds = listOf(eventId),
+                    )
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Cache failures must not change the successful relay result.
+            }
+        }
+        return response
     }
 
     override suspend fun getUserLikesFeed(pubkey: String, since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {

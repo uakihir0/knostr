@@ -1,5 +1,6 @@
 package work.socialhub.knostr.social.internal
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -93,6 +94,8 @@ class ZapResourceImpl(
         if (pubkeys.isEmpty()) return
         val users = try {
             socialCache.get(SocialDataRequest(userPubkeys = pubkeys)).users.associateBy { it.pubkey }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             emptyMap()
         }

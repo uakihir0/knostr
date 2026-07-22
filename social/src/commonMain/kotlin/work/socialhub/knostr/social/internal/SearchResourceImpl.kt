@@ -1,5 +1,6 @@
 package work.socialhub.knostr.social.internal
 
+import kotlinx.coroutines.CancellationException
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.api.response.Response
@@ -58,6 +59,8 @@ class SearchResourceImpl(
                     noteStatsEventIds = eventIds,
                 )
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             SocialDataBatch()
         }
@@ -86,6 +89,8 @@ class SearchResourceImpl(
         if (batch.isEmpty()) return
         try {
             socialCache.put(batch)
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             // Cache failures must not fail search.
         }
