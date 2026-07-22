@@ -54,6 +54,33 @@ class ReviewFeedbackTest {
     }
 
     @Test
+    fun profileBadgesPreserveColonsInDefinitionIdentifier() = runBlocking {
+        val dTag = "founder:2026"
+        val profileBadges = event(
+            kind = EventKind.PROFILE_BADGES,
+            tags = listOf(listOf("a", "${EventKind.BADGE_DEFINITION}:$pubkey:$dTag")),
+        )
+        val badgeDefinition = event(
+            kind = EventKind.BADGE_DEFINITION,
+            tags = listOf(listOf("d", dTag), listOf("name", "Founder 2026")),
+        )
+        val events = fakeEvents(
+            query = { filters ->
+                when (filters.single().kinds) {
+                    listOf(EventKind.PROFILE_BADGES) -> Response(listOf(profileBadges))
+                    listOf(EventKind.BADGE_DEFINITION) -> Response(listOf(badgeDefinition))
+                    else -> Response(listOf())
+                }
+            },
+        )
+
+        val response = BadgeResourceImpl(fakeNostr(events)).getProfileBadges(pubkey)
+
+        assertEquals(dTag, response.data.single().dTag)
+        assertEquals("Founder 2026", response.data.single().name)
+    }
+
+    @Test
     fun listMutationsRejectIncompleteSourceQueries() = runBlocking {
         var publishCalls = 0
         val events = fakeEvents(

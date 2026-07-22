@@ -131,7 +131,7 @@ class BadgeResourceImpl(
         val badges = mutableListOf<NostrBadge>()
         var isComplete = response.isComplete
         for (aTag in aTags) {
-            val parts = aTag.split(":")
+            val parts = aTag.split(":", limit = 3)
             if (parts.size >= 3 && parts[0] == EventKind.BADGE_DEFINITION.toString()) {
                 try {
                     val badgeResponse = getBadgeDefinition(parts[1], parts[2])
