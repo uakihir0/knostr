@@ -14,10 +14,14 @@ import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.relay.RelayPool
 import work.socialhub.knostr.signing.NostrSigner
 import work.socialhub.knostr.signing.Secp256k1Signer
+import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.internal.BadgeResourceImpl
 import work.socialhub.knostr.social.internal.BookmarkResourceImpl
 import work.socialhub.knostr.social.internal.ChannelResourceImpl
 import work.socialhub.knostr.social.internal.InterestResourceImpl
+import work.socialhub.knostr.social.internal.SearchResourceImpl
+import work.socialhub.knostr.social.model.SocialDataBatch
+import work.socialhub.knostr.social.model.SocialDataRequest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -81,6 +85,20 @@ class ReviewFeedbackTest {
     }
 
     @Test
+    fun userSearchCachesOnlyNewestMetadataPerPubkey() = runBlocking {
+        val older = metadata(createdAt = 1, name = "old")
+        val newer = metadata(createdAt = 2, name = "new")
+        val cache = RecordingCache()
+        val events = fakeEvents(query = { Response(listOf(newer, older)) })
+
+        SearchResourceImpl(fakeNostr(events), socialCache = cache)
+            .searchUsers("founder", limit = 10)
+
+        assertEquals(1, cache.stored.users.size)
+        assertEquals("new", cache.stored.users.single().name)
+    }
+
+    @Test
     fun listMutationsRejectIncompleteSourceQueries() = runBlocking {
         var publishCalls = 0
         val events = fakeEvents(
@@ -115,6 +133,28 @@ class ReviewFeedbackTest {
         content = "",
         sig = "",
     )
+
+    private fun metadata(createdAt: Long, name: String) = NostrEvent(
+        id = createdAt.toString().padStart(64, '0'),
+        pubkey = pubkey,
+        createdAt = createdAt,
+        kind = EventKind.METADATA,
+        tags = listOf(),
+        content = """{"name":"$name"}""",
+        sig = "",
+    )
+
+    private class RecordingCache : SocialCache {
+        var stored = SocialDataBatch()
+
+        override suspend fun get(request: SocialDataRequest) = SocialDataBatch()
+
+        override suspend fun put(batch: SocialDataBatch) {
+            stored = batch
+        }
+
+        override suspend fun remove(request: SocialDataRequest) = Unit
+    }
 
     private fun fakeEvents(
         query: suspend (List<NostrFilter>) -> Response<List<NostrEvent>>,

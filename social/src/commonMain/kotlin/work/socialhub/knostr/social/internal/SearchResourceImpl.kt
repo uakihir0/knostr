@@ -42,7 +42,11 @@ class SearchResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val users = response.data.map { SocialMapper.toUser(it) }
-        cachePut(SocialDataBatch(users = users))
+        val newestUsers = response.data
+            .sortedByDescending { it.createdAt }
+            .distinctBy { it.pubkey }
+            .map { SocialMapper.toUser(it) }
+        cachePut(SocialDataBatch(users = newestUsers))
         return response.withData(users)
     }
 
