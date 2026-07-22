@@ -216,10 +216,11 @@ class EnrichmentResourceTest {
         )
         var statsQueries = 0
         val eventResource = fakeEvents { filter ->
-            when (filter.kinds) {
-                listOf(EventKind.TEXT_NOTE) -> Response(listOf(note))
-                listOf(EventKind.METADATA) -> Response(listOf(metadata(pubkey, "alice")))
-                listOf(EventKind.REACTION) -> {
+            when {
+                filter.kinds == listOf(EventKind.TEXT_NOTE) -> Response(listOf(note))
+                filter.kinds == listOf(EventKind.METADATA) ->
+                    Response(listOf(metadata(pubkey, "alice")))
+                filter.kinds?.contains(EventKind.REACTION) == true -> {
                     statsQueries++
                     Response(listOf(partialReaction)).also { it.isComplete = false }
                 }
@@ -331,6 +332,14 @@ class EnrichmentResourceTest {
 
         assertEquals(3, statsFilters.size)
         assertTrue(statsFilters.all { it.limit == null })
+        assertEquals(
+            setOf(
+                listOf(EventKind.REACTION),
+                listOf(EventKind.TEXT_NOTE),
+                listOf(EventKind.REPOST, EventKind.GENERIC_REPOST),
+            ),
+            statsFilters.map { it.kinds ?: listOf() }.toSet(),
+        )
         assertEquals(250, returned.likeCount)
         assertEquals(40, returned.replyCount)
         assertEquals(30, returned.repostCount)
@@ -352,6 +361,36 @@ class EnrichmentResourceTest {
         val returned = feed.getNote(noteId).data
 
         assertEquals(quotedId, returned.quotedNote?.event?.id)
+        enrichment.close()
+    }
+
+    @Test
+    fun cachedQuoteIsAttachedBeforeAuthorPopulation() = runBlocking {
+        val quotedId = "7".repeat(64)
+        val quotedPubkey = "8".repeat(64)
+        val rootEvent = textNote(noteId, pubkey).copy(tags = listOf(listOf("q", quotedId)))
+        val quoted = SocialMapper.toNote(textNote(quotedId, quotedPubkey))
+        val cache = RecordingCache(SocialDataBatch(notes = listOf(quoted)))
+        val eventResource = fakeEventsForFilters { filters ->
+            when {
+                filters.size == 3 -> Response(listOf())
+                filters.single().kinds == listOf(EventKind.TEXT_NOTE) -> Response(listOf(rootEvent))
+                filters.single().kinds == listOf(EventKind.METADATA) -> Response(
+                    listOf(
+                        metadata(pubkey, "root-author"),
+                        metadata(quotedPubkey, "quoted-author"),
+                    )
+                )
+                else -> Response(listOf())
+            }
+        }
+        val nostr = fakeNostr(eventResource)
+        val enrichment = EnrichmentResourceImpl(nostr, cache, config())
+        val feed = FeedResourceImpl(nostr, config(), cache, enrichment)
+
+        val returned = feed.getUserFeed(pubkey).data.single()
+
+        assertEquals("quoted-author", returned.quotedNote?.author?.name)
         enrichment.close()
     }
 
