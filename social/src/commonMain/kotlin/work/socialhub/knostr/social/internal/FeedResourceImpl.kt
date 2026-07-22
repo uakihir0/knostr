@@ -89,9 +89,9 @@ class FeedResourceImpl(
             notes = notes.filterNot { it.isSensitive }
         }
         if (notes.isNotEmpty()) {
+            populateQuotedNotes(notes)
             populateAuthors(notes)
             populateLikeCounts(notes)
-            populateQuotedNotes(notes)
         }
 
         return Response(notes)
@@ -157,9 +157,9 @@ class FeedResourceImpl(
             notes = notes.filterNot { it.isSensitive }
         }
         if (notes.isNotEmpty()) {
+            populateQuotedNotes(notes)
             populateAuthors(notes)
             populateLikeCounts(notes)
-            populateQuotedNotes(notes)
         }
         return Response(notes)
     }
@@ -182,9 +182,9 @@ class FeedResourceImpl(
             notes = notes.filterNot { it.isSensitive }
         }
         if (notes.isNotEmpty()) {
+            populateQuotedNotes(notes)
             populateAuthors(notes)
             populateLikeCounts(notes)
-            populateQuotedNotes(notes)
         }
         return Response(notes)
     }
@@ -241,9 +241,9 @@ class FeedResourceImpl(
         thread.replies = ancestors + descendants
         thread.rootNote?.let {
             val allNotes = listOf(it) + thread.replies
+            populateQuotedNotes(allNotes)
             populateAuthors(allNotes)
             populateLikeCounts(allNotes)
-            populateQuotedNotes(allNotes)
         }
         return Response(thread)
     }
@@ -387,12 +387,13 @@ class FeedResourceImpl(
     }
 
     private suspend fun populateQuotedNotes(notes: List<NostrNote>) {
-        val targets = notes.mapNotNull { it.quotedEventId }.distinct()
+        val unresolved = notes.filter { it.quotedEventId != null && it.quotedNote == null }
+        val targets = unresolved.mapNotNull { it.quotedEventId }.distinct()
         if (targets.isEmpty()) return
         val cached = cacheGet(SocialDataRequest(noteIds = targets))
             .notes.associateBy { it.event.id }
-        notes.forEach { note ->
-            note.quotedNote = note.quotedEventId?.let { cached[it] }
+        unresolved.forEach { note ->
+            note.quotedEventId?.let { cached[it] }?.let { note.quotedNote = it }
         }
         val missing = targets.filter { it !in cached }
         if (missing.isNotEmpty()) {
@@ -577,9 +578,9 @@ class FeedResourceImpl(
             notes = notes.filterNot { it.isSensitive }
         }
         if (notes.isNotEmpty()) {
+            populateQuotedNotes(notes)
             populateAuthors(notes)
             populateLikeCounts(notes)
-            populateQuotedNotes(notes)
         }
 
         return Response(notes)
@@ -610,9 +611,9 @@ class FeedResourceImpl(
         }
         mediaNotes = mediaNotes.take(limit)
         if (mediaNotes.isNotEmpty()) {
+            populateQuotedNotes(mediaNotes)
             populateAuthors(mediaNotes)
             populateLikeCounts(mediaNotes)
-            populateQuotedNotes(mediaNotes)
         }
 
         return Response(mediaNotes)
