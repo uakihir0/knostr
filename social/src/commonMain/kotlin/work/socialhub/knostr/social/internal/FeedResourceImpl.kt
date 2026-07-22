@@ -370,16 +370,19 @@ class FeedResourceImpl(
             cachedStats[note.event.id]?.let { applyStats(note, it) }
         }
 
-        val statsResponse = nostr.events().queryEvents(SocialStats.filters(eventIds))
+        val uncachedEventIds = eventIds.filter { it !in cachedStats }
+        if (uncachedEventIds.isEmpty()) return
+
+        val statsResponse = nostr.events().queryEvents(SocialStats.filters(uncachedEventIds))
         if (statsResponse.isComplete) {
-            val stats = notes.map { note ->
+            val stats = notes.filter { it.event.id in uncachedEventIds }.map { note ->
                 SocialStats.calculate(note.event.id, statsResponse.data).also {
                     applyStats(note, it)
                 }
             }
             cachePut(SocialDataBatch(noteStats = stats))
         } else {
-            enrichment.requestMissing(SocialDataRequest(noteStatsEventIds = eventIds))
+            enrichment.requestMissing(SocialDataRequest(noteStatsEventIds = uncachedEventIds))
         }
     }
 

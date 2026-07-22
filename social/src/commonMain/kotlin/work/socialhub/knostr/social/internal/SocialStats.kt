@@ -45,6 +45,10 @@ internal object SocialStats {
         val eTags = event.tags.filter { it.size >= 2 && it[0] == "e" }
         if (eTags.isEmpty()) return null
         eTags.firstOrNull { it.size >= 4 && it[3] == "reply" }?.let { return it[1] }
-        return if (eTags.size == 1) eTags[0][1] else eTags.last()[1]
+        val unmarkedTags = eTags.filter { it.size < 4 || it[3].isEmpty() }
+        if (unmarkedTags.isNotEmpty()) {
+            return if (unmarkedTags.size == 1) unmarkedTags[0][1] else unmarkedTags.last()[1]
+        }
+        return eTags.firstOrNull { it.size >= 4 && it[3] == "root" }?.get(1)
     }
 }

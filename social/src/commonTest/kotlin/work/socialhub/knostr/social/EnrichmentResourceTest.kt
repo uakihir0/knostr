@@ -19,6 +19,7 @@ import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.internal.EnrichmentResourceImpl
 import work.socialhub.knostr.social.internal.FeedResourceImpl
 import work.socialhub.knostr.social.internal.SocialMapper
+import work.socialhub.knostr.social.internal.SocialStats
 import work.socialhub.knostr.social.model.NostrNoteStats
 import work.socialhub.knostr.social.model.SocialDataBatch
 import work.socialhub.knostr.social.model.SocialDataRequest
@@ -202,7 +203,7 @@ class EnrichmentResourceTest {
     }
 
     @Test
-    fun incompleteStatsDoNotReplaceFreshCachedCounts() = runBlocking {
+    fun freshCachedStatsSkipRelayQuery() = runBlocking {
         val note = textNote(noteId, pubkey)
         val partialReaction = NostrEvent(
             id = "6".repeat(64),
@@ -213,12 +214,14 @@ class EnrichmentResourceTest {
             content = "+",
             sig = "",
         )
+        var statsQueries = 0
         val eventResource = fakeEvents { filter ->
             when (filter.kinds) {
                 listOf(EventKind.TEXT_NOTE) -> Response(listOf(note))
                 listOf(EventKind.METADATA) -> Response(listOf(metadata(pubkey, "alice")))
-                listOf(EventKind.REACTION) -> Response(listOf(partialReaction)).also {
-                    it.isComplete = false
+                listOf(EventKind.REACTION) -> {
+                    statsQueries++
+                    Response(listOf(partialReaction)).also { it.isComplete = false }
                 }
                 else -> Response(listOf())
             }
@@ -244,7 +247,30 @@ class EnrichmentResourceTest {
         assertEquals(7, returned.likeCount)
         assertEquals(8, returned.replyCount)
         assertEquals(9, returned.repostCount)
+        assertEquals(0, statsQueries)
         enrichment.close()
+    }
+
+    @Test
+    fun markedMentionIsNotCountedAsReply() {
+        val mention = textNote("8".repeat(64), pubkey).copy(
+            tags = listOf(listOf("e", noteId, "", "mention"))
+        )
+
+        val stats = SocialStats.calculate(noteId, listOf(mention))
+
+        assertEquals(0, stats.replyCount)
+    }
+
+    @Test
+    fun loneRootMarkerStillCountsAsDirectReply() {
+        val reply = textNote("9".repeat(64), pubkey).copy(
+            tags = listOf(listOf("e", noteId, "", "root"))
+        )
+
+        val stats = SocialStats.calculate(noteId, listOf(reply))
+
+        assertEquals(1, stats.replyCount)
     }
 
     @Test
