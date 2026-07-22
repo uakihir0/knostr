@@ -105,18 +105,24 @@ class TimelineStream(
                     .distinctBy { it.pubkey }
                 val mapped = users.associate { it.pubkey to SocialMapper.toUser(it) }
                 prefetchedUsers.putAll(mapped)
-                try {
-                    socialCache.put(SocialDataBatch(users = mapped.values.toList()))
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Exception) {
-                    // Keep using prefetchedUsers when an application cache is unavailable.
+                if (response.isComplete) {
+                    try {
+                        socialCache.put(SocialDataBatch(users = mapped.values.toList()))
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // Keep using prefetchedUsers when an application cache is unavailable.
+                    }
                 }
-                val missing = batch.filter { it !in mapped }
-                if (missing.isNotEmpty()) {
+                val unresolved = if (response.isComplete) {
+                    batch.filter { it !in mapped }
+                } else {
+                    batch
+                }
+                if (unresolved.isNotEmpty()) {
                     enrichment?.request(
-                        SocialDataRequest(userPubkeys = missing),
-                        forceRefresh = false,
+                        SocialDataRequest(userPubkeys = unresolved),
+                        forceRefresh = !response.isComplete,
                     )
                 }
             } catch (e: CancellationException) {

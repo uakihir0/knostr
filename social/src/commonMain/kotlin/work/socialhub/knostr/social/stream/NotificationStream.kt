@@ -6,6 +6,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.entity.NostrEvent
@@ -38,6 +40,8 @@ class NotificationStream(
     private var subscriptionId: String? = null
     private var scope: CoroutineScope? = null
     private var eventChannel: Channel<NostrEvent>? = null
+    private val localUsers = mutableMapOf<String, NostrUser>()
+    private val localUsersMutex = Mutex()
 
     /** Start streaming notifications for the given pubkey */
     suspend fun start(myPubkey: String) {
@@ -91,15 +95,18 @@ class NotificationStream(
         )
     }
 
-    private suspend fun resolveAuthor(pubkey: String): NostrUser? {
-        try {
+    internal suspend fun resolveAuthor(pubkey: String): NostrUser? {
+        val cached = try {
             socialCache.get(SocialDataRequest(userPubkeys = listOf(pubkey)))
                 .users.firstOrNull { it.pubkey == pubkey }
-                ?.let { return it }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
-            // Fall through to relay lookup.
+            null
+        }
+        if (cached != null) return cached
+        localUsersMutex.withLock {
+            localUsers[pubkey]?.let { return it }
         }
         try {
             val filter = NostrFilter(
@@ -113,12 +120,22 @@ class NotificationStream(
                 .firstOrNull()
             if (event != null) {
                 val user = SocialMapper.toUser(event)
-                try {
-                    socialCache.put(SocialDataBatch(users = listOf(user)))
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Exception) {
-                    // A cache failure does not discard relay data.
+                localUsersMutex.withLock {
+                    localUsers[pubkey] = user
+                }
+                if (response.isComplete) {
+                    try {
+                        socialCache.put(SocialDataBatch(users = listOf(user)))
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // localUsers retains successfully resolved relay data.
+                    }
+                } else {
+                    enrichment?.request(
+                        SocialDataRequest(userPubkeys = listOf(pubkey)),
+                        forceRefresh = true,
+                    )
                 }
                 return user
             }
@@ -144,5 +161,8 @@ class NotificationStream(
         eventChannel = null
         scope?.cancel()
         scope = null
+        localUsersMutex.withLock {
+            localUsers.clear()
+        }
     }
 }

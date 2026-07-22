@@ -55,7 +55,7 @@ class FeedResourceImpl(
             ?.let { SocialMapper.toFollowList(it) }
             ?: listOf()
 
-        if (config.cacheFollowList && pubkeys.isNotEmpty()) {
+        if (config.cacheFollowList && followResponse.isComplete && pubkeys.isNotEmpty()) {
             cachedFollowList = pubkeys
             followListCachedAt = Clock.System.now().toEpochMilliseconds()
         }
@@ -347,17 +347,29 @@ class FeedResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val fetched = processMetadataEvents(response.data).toMutableMap()
+        val cacheable = mutableMapOf<String, NostrUser>()
+        if (response.isComplete) {
+            cacheable.putAll(fetched)
+        }
 
-        // Retry once for pubkeys that got no response
-        val missing = pubkeys.filter { it !in fetched }
-        if (missing.isNotEmpty()) {
+        // Retry missing profiles, or the full batch when the first result was incomplete.
+        val retryPubkeys = if (response.isComplete) {
+            pubkeys.filter { it !in fetched }
+        } else {
+            pubkeys
+        }
+        if (retryPubkeys.isNotEmpty()) {
             val retryFilter = NostrFilter(
-                authors = missing,
+                authors = retryPubkeys,
                 kinds = listOf(EventKind.METADATA),
             )
             try {
                 val retryResponse = nostr.events().queryEvents(listOf(retryFilter))
-                fetched.putAll(processMetadataEvents(retryResponse.data))
+                val retryFetched = processMetadataEvents(retryResponse.data)
+                fetched.putAll(retryFetched)
+                if (retryResponse.isComplete) {
+                    cacheable.putAll(retryFetched)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -365,7 +377,14 @@ class FeedResourceImpl(
             }
         }
 
-        cachePut(SocialDataBatch(users = fetched.values.toList()))
+        cachePut(SocialDataBatch(users = cacheable.values.toList()))
+        val unresolved = pubkeys.filter { it !in cacheable }
+        if (unresolved.isNotEmpty()) {
+            enrichment.request(
+                SocialDataRequest(userPubkeys = unresolved),
+                forceRefresh = true,
+            )
+        }
         return fetched
     }
 
