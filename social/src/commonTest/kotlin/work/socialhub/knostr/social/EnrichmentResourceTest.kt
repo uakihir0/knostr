@@ -669,6 +669,57 @@ class EnrichmentResourceTest {
     }
 
     @Test
+    fun requestStartedDuringCancellationRunsAfterCleanup() = runBlocking {
+        val cacheReadStarted = CompletableDeferred<Unit>()
+        val cancellationCleanupStarted = CompletableDeferred<Unit>()
+        val finishCancellationCleanup = CompletableDeferred<Unit>()
+        var cacheReads = 0
+        val cachedUser = SocialMapper.toUser(metadata(pubkey, "fresh"))
+        val cache = object : SocialCache {
+            override suspend fun get(request: SocialDataRequest): SocialDataBatch {
+                cacheReads++
+                if (cacheReads == 1) {
+                    cacheReadStarted.complete(Unit)
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        withContext(NonCancellable) {
+                            cancellationCleanupStarted.complete(Unit)
+                            finishCancellationCleanup.await()
+                        }
+                    }
+                }
+                return SocialDataBatch(users = listOf(cachedUser))
+            }
+
+            override suspend fun put(batch: SocialDataBatch) = Unit
+            override suspend fun remove(request: SocialDataRequest) = Unit
+        }
+        val enrichment = EnrichmentResourceImpl(
+            fakeNostr(fakeEvents { Response(listOf()) }),
+            cache,
+            config(),
+        )
+        val update = CompletableDeferred<SocialDataBatch>()
+        enrichment.onUpdateCallback = { batch ->
+            if (batch.users.isNotEmpty()) update.complete(batch)
+        }
+
+        enrichment.request(SocialDataRequest(userPubkeys = listOf(pubkey)), forceRefresh = false)
+        withTimeout(2_000) { cacheReadStarted.await() }
+        val cancellation = async { enrichment.cancelPending() }
+        withTimeout(2_000) { cancellationCleanupStarted.await() }
+
+        enrichment.request(SocialDataRequest(userPubkeys = listOf(pubkey)), forceRefresh = false)
+        finishCancellationCleanup.complete(Unit)
+        withTimeout(2_000) { cancellation.await() }
+
+        assertEquals("fresh", withTimeout(2_000) { update.await() }.users.single().name)
+        assertEquals(2, cacheReads)
+        enrichment.close()
+    }
+
+    @Test
     fun closeRejectsFurtherRequests() = runBlocking {
         var queries = 0
         val enrichment = EnrichmentResourceImpl(
