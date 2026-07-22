@@ -20,7 +20,7 @@ class InterestResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to follow hashtag")
 
-        val currentTags = getInterestTags().data
+        val currentTags = getInterestTags().requireCompleteData("update followed hashtags")
         val tags = currentTags.toMutableList()
         val normalized = hashtag.lowercase()
         if (tags.none { it.size >= 2 && it[0] == "t" && it[1] == normalized }) {
@@ -34,7 +34,7 @@ class InterestResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to unfollow hashtag")
 
-        val currentTags = getInterestTags().data
+        val currentTags = getInterestTags().requireCompleteData("update followed hashtags")
         val normalized = hashtag.lowercase()
         val tags = currentTags.filter { !(it.size >= 2 && it[0] == "t" && it[1] == normalized) }
 

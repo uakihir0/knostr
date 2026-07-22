@@ -20,7 +20,7 @@ class BookmarkResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to bookmark")
 
-        val currentTags = getBookmarkTags().data
+        val currentTags = getBookmarkTags().requireCompleteData("update bookmarks")
         val tags = currentTags.toMutableList()
         if (tags.none { it.size >= 2 && it[0] == "e" && it[1] == eventId }) {
             tags.add(listOf("e", eventId))
@@ -33,7 +33,7 @@ class BookmarkResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to unbookmark")
 
-        val currentTags = getBookmarkTags().data
+        val currentTags = getBookmarkTags().requireCompleteData("update bookmarks")
         val tags = currentTags.filter { !(it.size >= 2 && it[0] == "e" && it[1] == eventId) }
 
         return publishBookmarkList(signer, tags)

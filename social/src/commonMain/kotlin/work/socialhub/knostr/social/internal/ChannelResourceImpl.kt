@@ -212,7 +212,7 @@ class ChannelResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to join channel")
 
-        val currentTags = getPublicChatsListTags().data
+        val currentTags = getPublicChatsListTags().requireCompleteData("update joined channels")
         val tags = currentTags.toMutableList()
         if (tags.none { it.size >= 2 && it[0] == "e" && it[1] == channelId }) {
             tags.add(listOf("e", channelId))
@@ -225,7 +225,7 @@ class ChannelResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to leave channel")
 
-        val currentTags = getPublicChatsListTags().data
+        val currentTags = getPublicChatsListTags().requireCompleteData("update joined channels")
         val tags = currentTags.filter { !(it.size >= 2 && it[0] == "e" && it[1] == channelId) }
 
         return publishPublicChatsList(signer, tags)
