@@ -465,6 +465,48 @@ class EnrichmentResourceTest {
     }
 
     @Test
+    fun fetchedNoteQueuesItsNestedQuoteForEnrichment() = runBlocking {
+        val quotedId = "7".repeat(64)
+        val root = textNote(noteId, pubkey).copy(tags = listOf(listOf("q", quotedId)))
+        val quoted = textNote(quotedId, pubkey)
+        val eventResource = fakeEvents { filter ->
+            when {
+                filter.kinds == listOf(EventKind.TEXT_NOTE) -> {
+                    val ids = filter.ids.orEmpty()
+                    Response(
+                        when {
+                            noteId in ids -> listOf(root)
+                            quotedId in ids -> listOf(quoted)
+                            else -> listOf()
+                        }
+                    )
+                }
+                else -> Response(listOf())
+            }
+        }
+        val enrichment = EnrichmentResourceImpl(
+            fakeNostr(eventResource),
+            RecordingCache(),
+            config(),
+        )
+        val nestedUpdate = CompletableDeferred<SocialDataBatch>()
+        enrichment.onUpdateCallback = { batch ->
+            if (batch.notes.any { it.event.id == quotedId }) {
+                nestedUpdate.complete(batch)
+            }
+        }
+
+        enrichment.request(
+            SocialDataRequest(noteIds = listOf(noteId)),
+            forceRefresh = true,
+        )
+
+        val batch = withTimeout(2_000) { nestedUpdate.await() }
+        assertEquals(quotedId, batch.notes.single().event.id)
+        enrichment.close()
+    }
+
+    @Test
     fun cacheFailureFallsBackToRelayAndStillNotifies() = runBlocking {
         val eventResource = fakeEvents { filter ->
             if (filter.kinds == listOf(EventKind.METADATA)) {

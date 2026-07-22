@@ -178,8 +178,16 @@ class EnrichmentResourceImpl(
                 remainingNotes.removeAll(batch.notes.map { note -> note.event.id }.toSet())
                 remainingStats.removeAll(batch.noteStats.map { stats -> stats.eventId }.toSet())
                 val noteAuthors = batch.notes.map { it.event.pubkey }.distinct()
-                if (noteAuthors.isNotEmpty()) {
-                    requestMissing(SocialDataRequest(userPubkeys = noteAuthors))
+                val quotedNoteIds = batch.notes.mapNotNull { note ->
+                    note.quotedEventId?.takeIf { note.quotedNote == null }
+                }.distinct()
+                if (noteAuthors.isNotEmpty() || quotedNoteIds.isNotEmpty()) {
+                    requestMissing(
+                        SocialDataRequest(
+                            userPubkeys = noteAuthors,
+                            noteIds = quotedNoteIds,
+                        ),
+                    )
                 }
             }
             retryDelay = (retryDelay * multiplier).toLong()
