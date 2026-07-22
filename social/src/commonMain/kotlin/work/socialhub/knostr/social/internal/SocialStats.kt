@@ -1,5 +1,8 @@
 package work.socialhub.knostr.social.internal
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
@@ -9,6 +12,8 @@ import work.socialhub.knostr.social.model.SocialDataBatch
 import work.socialhub.knostr.social.model.SocialDataRequest
 
 internal object SocialStats {
+    private val adjustmentMutex = Mutex()
+
     fun filters(eventIds: List<String>): List<NostrFilter> {
         return listOf(
             NostrFilter(
@@ -50,17 +55,24 @@ internal object SocialStats {
         eventId: String,
         transform: (NostrNoteStats) -> NostrNoteStats,
     ) {
-        try {
-            val cached = cache.get(
-                SocialDataRequest(noteStatsEventIds = listOf(eventId))
-            ).noteStats.firstOrNull { it.eventId == eventId }
-            if (cached != null) {
-                cache.put(SocialDataBatch(noteStats = listOf(transform(cached))))
-                return
+        val adjusted = adjustmentMutex.withLock {
+            try {
+                val cached = cache.get(
+                    SocialDataRequest(noteStatsEventIds = listOf(eventId))
+                ).noteStats.firstOrNull { it.eventId == eventId }
+                if (cached != null) {
+                    cache.put(SocialDataBatch(noteStats = listOf(transform(cached))))
+                    true
+                } else {
+                    false
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                false
             }
-        } catch (_: Exception) {
-            // Fall through to a relay-backed refresh.
         }
+        if (adjusted) return
         enrichment.request(
             SocialDataRequest(noteStatsEventIds = listOf(eventId)),
             forceRefresh = true,

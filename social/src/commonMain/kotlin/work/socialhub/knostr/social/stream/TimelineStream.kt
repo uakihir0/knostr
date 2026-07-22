@@ -1,8 +1,11 @@
 package work.socialhub.knostr.social.stream
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import work.socialhub.knostr.EventKind
@@ -32,6 +35,7 @@ class TimelineStream(
 
     private var subscriptionId: String? = null
     private var scope: CoroutineScope? = null
+    private var processorJob: Job? = null
     private var eventChannel: Channel<NostrEvent>? = null
     private val prefetchedUsers = mutableMapOf<String, NostrUser>()
 
@@ -52,7 +56,7 @@ class TimelineStream(
         val channel = Channel<NostrEvent>(Channel.UNLIMITED)
         eventChannel = channel
 
-        newScope.launch {
+        processorJob = newScope.launch {
             for (event in channel) {
                 try {
                     val note = SocialMapper.toNote(event)
@@ -66,6 +70,8 @@ class TimelineStream(
                         }
                     }
                     onNoteCallback?.invoke(note)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     onErrorCallback?.invoke(e)
                 }
@@ -101,6 +107,8 @@ class TimelineStream(
                 prefetchedUsers.putAll(mapped)
                 try {
                     socialCache.put(SocialDataBatch(users = mapped.values.toList()))
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (_: Exception) {
                     // Keep using prefetchedUsers when an application cache is unavailable.
                 }
@@ -111,6 +119,8 @@ class TimelineStream(
                         forceRefresh = false,
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 enrichment?.request(
                     SocialDataRequest(userPubkeys = batch),
@@ -125,6 +135,8 @@ class TimelineStream(
         return try {
             socialCache.get(SocialDataRequest(userPubkeys = listOf(pubkey)))
                 .users.firstOrNull { it.pubkey == pubkey }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             null
         }
@@ -138,6 +150,8 @@ class TimelineStream(
         }
         eventChannel?.close()
         eventChannel = null
+        processorJob?.cancelAndJoin()
+        processorJob = null
         scope?.cancel()
         scope = null
         prefetchedUsers.clear()

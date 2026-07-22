@@ -1,5 +1,6 @@
 package work.socialhub.knostr.social.internal
 
+import kotlinx.coroutines.CancellationException
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.NostrException
@@ -114,6 +115,8 @@ internal class ReactionResourceImpl(
         val pubkeys = reactions.map { it.event.pubkey }.distinct()
         val users = try {
             socialCache.get(SocialDataRequest(userPubkeys = pubkeys)).users.associateBy { it.pubkey }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             emptyMap()
         }
