@@ -1,20 +1,24 @@
 package work.socialhub.knostr.social.stream
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
-import work.socialhub.knostr.social.internal.ProfileCache
+import work.socialhub.knostr.social.api.EnrichmentResource
+import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.internal.SocialMapper
 import work.socialhub.knostr.social.model.NostrNote
 import work.socialhub.knostr.social.model.NostrUser
+import work.socialhub.knostr.social.model.SocialDataBatch
+import work.socialhub.knostr.social.model.SocialDataRequest
 import kotlin.time.Clock
 
 /**
@@ -23,16 +27,17 @@ import kotlin.time.Clock
  */
 class TimelineStream(
     private val nostr: Nostr,
-    private val profileCache: ProfileCache? = null,
+    private val socialCache: SocialCache,
+    private val enrichment: EnrichmentResource? = null,
 ) {
     var onNoteCallback: ((NostrNote) -> Unit)? = null
     var onErrorCallback: ((Exception) -> Unit)? = null
 
     private var subscriptionId: String? = null
-    private val localCache = mutableMapOf<String, NostrUser>()
-    private val cacheMutex = Mutex()
     private var scope: CoroutineScope? = null
+    private var processorJob: Job? = null
     private var eventChannel: Channel<NostrEvent>? = null
+    private val prefetchedUsers = mutableMapOf<String, NostrUser>()
 
     /** Start streaming home timeline for the given list of followed pubkeys */
     suspend fun start(followingPubkeys: List<String>) {
@@ -51,15 +56,22 @@ class TimelineStream(
         val channel = Channel<NostrEvent>(Channel.UNLIMITED)
         eventChannel = channel
 
-        newScope.launch {
+        processorJob = newScope.launch {
             for (event in channel) {
                 try {
                     val note = SocialMapper.toNote(event)
                     if (note.author == null) {
-                        note.author = profileCache?.get(event.pubkey)
-                            ?: cacheMutex.withLock { localCache[event.pubkey] }
+                        note.author = cachedUser(event.pubkey)
+                        if (note.author == null) {
+                            enrichment?.request(
+                                SocialDataRequest(userPubkeys = listOf(event.pubkey)),
+                                forceRefresh = false,
+                            )
+                        }
                     }
                     onNoteCallback?.invoke(note)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     onErrorCallback?.invoke(e)
                 }
@@ -92,13 +104,47 @@ class TimelineStream(
                     .sortedByDescending { it.createdAt }
                     .distinctBy { it.pubkey }
                 val mapped = users.associate { it.pubkey to SocialMapper.toUser(it) }
-                profileCache?.putAll(mapped)
-                cacheMutex.withLock {
-                    localCache.putAll(mapped)
+                prefetchedUsers.putAll(mapped)
+                if (response.isComplete) {
+                    try {
+                        socialCache.put(SocialDataBatch(users = mapped.values.toList()))
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // Keep using prefetchedUsers when an application cache is unavailable.
+                    }
                 }
+                val unresolved = if (response.isComplete) {
+                    batch.filter { it !in mapped }
+                } else {
+                    batch
+                }
+                if (unresolved.isNotEmpty()) {
+                    enrichment?.request(
+                        SocialDataRequest(userPubkeys = unresolved),
+                        forceRefresh = !response.isComplete,
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
-                // Best-effort per batch: continue with remaining batches
+                enrichment?.request(
+                    SocialDataRequest(userPubkeys = batch),
+                    forceRefresh = false,
+                )
             }
+        }
+    }
+
+    private suspend fun cachedUser(pubkey: String): NostrUser? {
+        return try {
+            socialCache.get(SocialDataRequest(userPubkeys = listOf(pubkey)))
+                .users.firstOrNull { it.pubkey == pubkey }
+                ?: prefetchedUsers[pubkey]
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            prefetchedUsers[pubkey]
         }
     }
 
@@ -110,7 +156,10 @@ class TimelineStream(
         }
         eventChannel?.close()
         eventChannel = null
+        processorJob?.cancelAndJoin()
+        processorJob = null
         scope?.cancel()
         scope = null
+        prefetchedUsers.clear()
     }
 }

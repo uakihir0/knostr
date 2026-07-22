@@ -41,7 +41,7 @@ class RelayListResourceImpl(
                     else -> NostrRelayListEntry(url, read = true, write = true)
                 }
             } ?: listOf()
-        return Response(entries)
+        return response.withData(entries)
     }
 
     override suspend fun setRelayList(relays: List<NostrRelayListEntry>): Response<NostrEvent> {

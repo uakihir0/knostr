@@ -79,6 +79,9 @@ val response = nostr.events().queryEvents(listOf(filter))
 response.data.forEach { event ->
     println("${event.pubkey}: ${event.content}")
 }
+if (!response.isComplete) {
+    println("The relay query timed out and returned partial data")
+}
 ```
 
 ### Posting & Feed (Social)
@@ -142,6 +145,39 @@ social.users().unfollow("pubkey-hex")
 val verified = social.users().verifyNip05("user@example.com").data
 ```
 
+### Deferred Enrichment & Cache (Social)
+
+Social calls return their current result immediately. Missing profiles, quoted
+notes, and note statistics are retried in the background and delivered in
+batches. Apply updates to application state by `pubkey` or `eventId`; objects
+returned by the original call are not mutated.
+
+```kotlin
+val config = NostrSocialConfig().apply {
+    socialCache = appSocialCache // optional SocialCache implementation
+}
+val social = NostrSocialFactory.instance(nostr, config)
+
+social.enrichment().onUpdateCallback = { batch ->
+    batch.users.forEach { userStore[it.pubkey] = it }
+    batch.notes.forEach { noteStore[it.event.id] = it }
+    batch.noteStats.forEach { statsStore[it.eventId] = it }
+}
+
+// Explicitly retry unresolved data, bypassing cached values.
+social.enrichment().request(
+    SocialDataRequest(
+        userPubkeys = listOf("pubkey-hex"),
+        noteIds = listOf("event-id"),
+        noteStatsEventIds = listOf("event-id"),
+    )
+)
+```
+
+An injected `SocialCache` receives `get(SocialDataRequest)`,
+`put(SocialDataBatch)`, and `remove(SocialDataRequest)` calls. It owns its
+freshness policy and should omit stale entries from `get`.
+
 ### Reactions (Social)
 
 ```kotlin
@@ -184,7 +220,8 @@ val mutedPubkeys = social.mutes().getMuteList().data
 ### Real-time Timeline (Social)
 
 ```kotlin
-val stream = TimelineStream(nostr)
+val social = NostrSocialFactory.instance(nostr)
+val stream = TimelineStream(nostr, social.cache(), social.enrichment())
 stream.onNoteCallback = { note ->
     println("New note: ${note.content}")
 }
@@ -287,8 +324,9 @@ val result = nostr.nip().resolveNip05("user@example.com")
 | `media()` | `upload`, `getServerInfo` | File upload (NIP-96) |
 | `mutes()` | `mute`, `unmute`, `getMuteList` | User muting (NIP-51) |
 | `messages()` | `sendMessage`, `getMessages`, `getConversation`, `sendLegacyMessage`, `getLegacyMessages` | Direct messages (NIP-17 / NIP-04) |
+| `enrichment()` | `request`, `cancelPending`, `close` | Deferred social data enrichment |
 
-All methods have both `suspend` (async) and `Blocking` (sync) variants.
+Social resource operations have both `suspend` (async) and `Blocking` (sync) variants.
 
 ## Supported NIPs
 

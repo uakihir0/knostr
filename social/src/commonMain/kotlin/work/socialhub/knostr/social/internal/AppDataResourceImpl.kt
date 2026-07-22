@@ -48,7 +48,7 @@ class AppDataResourceImpl(
         val content = response.data
             .maxByOrNull { it.createdAt }
             ?.content
-        return Response(content)
+        return response.withData(content)
     }
 
     override fun setAppDataBlocking(dTag: String, content: String): Response<NostrEvent> {

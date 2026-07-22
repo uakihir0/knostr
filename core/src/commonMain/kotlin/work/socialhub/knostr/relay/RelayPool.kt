@@ -10,6 +10,8 @@ import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.signing.NostrSigner
+import kotlin.concurrent.atomics.AtomicReference
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.random.Random
 import kotlin.time.Clock
 
@@ -17,16 +19,12 @@ import kotlin.time.Clock
  * Manages multiple relay connections.
  * Handles event deduplication, subscription distribution, and event publishing.
  */
+@OptIn(ExperimentalAtomicApi::class)
 class RelayPool {
 
     private val connections = mutableMapOf<String, RelayConnection>()
-    private val subscriptions = mutableMapOf<String, Subscription>()
-    private val seenEventIds = LinkedHashSet<String>()
+    private val subscriptions = AtomicReference<Map<String, Subscription>>(emptyMap())
     private val mutex = Mutex()
-
-    private companion object {
-        const val MAX_SEEN_EVENTS = 10_000
-    }
 
     /** Whether any relay is currently connected */
     val isConnected: Boolean
@@ -54,13 +52,13 @@ class RelayPool {
             reconnectDelayMs = config?.reconnectDelayMs ?: 1_000,
         )
         connection.onEventCallback = { subId, event ->
-            handleEvent(url, subId, event)
+            handleEvent(subId, event)
         }
         connection.onOkCallback = { eventId, success, message ->
             onOkCallback?.invoke(eventId, success, message)
         }
         connection.onEoseCallback = { subId ->
-            subscriptions[subId]?.onEose?.invoke(url)
+            subscriptions.load()[subId]?.onEose?.invoke(url)
         }
         connection.onNoticeCallback = { message ->
             onNoticeCallback?.invoke(url, message)
@@ -131,7 +129,7 @@ class RelayPool {
         val subId = generateSubscriptionId()
         val subscription = Subscription(subId, filters, onEvent, onEose)
         mutex.withLock {
-            subscriptions[subId] = subscription
+            subscriptions.store(subscriptions.load() + (subId to subscription))
 
             for (connection in connections.values) {
                 if (connection.isOpen) {
@@ -145,7 +143,7 @@ class RelayPool {
     /** Unsubscribe from a subscription */
     suspend fun unsubscribe(subscriptionId: String) {
         mutex.withLock {
-            subscriptions.remove(subscriptionId)
+            subscriptions.store(subscriptions.load() - subscriptionId)
             for (connection in connections.values) {
                 if (connection.isOpen) {
                     connection.sendClose(subscriptionId)
@@ -156,7 +154,7 @@ class RelayPool {
 
     /** Clear seen event IDs cache */
     fun clearSeenEvents() {
-        seenEventIds.clear()
+        subscriptions.load().values.forEach { it.clearSeenEvents() }
     }
 
     private var poolScope: CoroutineScope? = null
@@ -187,25 +185,10 @@ class RelayPool {
         }
     }
 
-    private fun handleEvent(relayUrl: String, subscriptionId: String, event: NostrEvent) {
-        // Evict oldest entries when at capacity
-        if (seenEventIds.size >= MAX_SEEN_EVENTS) {
-            val iterator = seenEventIds.iterator()
-            repeat(MAX_SEEN_EVENTS / 10) {
-                if (iterator.hasNext()) {
-                    iterator.next()
-                    iterator.remove()
-                }
-            }
-        }
-
-        // Deduplicate events by ID
-        if (!seenEventIds.add(event.id)) {
-            return
-        }
-
-        // Dispatch to subscription callback
-        subscriptions[subscriptionId]?.onEvent?.invoke(event)
+    private fun handleEvent(subscriptionId: String, event: NostrEvent) {
+        val subscription = subscriptions.load()[subscriptionId] ?: return
+        if (!subscription.acceptEvent(event.id)) return
+        subscription.onEvent.invoke(event)
 
         // Dispatch to pool-level callback
         onEventCallback?.invoke(subscriptionId, event)

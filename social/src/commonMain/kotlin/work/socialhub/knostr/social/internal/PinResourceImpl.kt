@@ -20,7 +20,7 @@ class PinResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to pin")
 
-        val currentTags = getPinTags()
+        val currentTags = getPinTags().requireCompleteData("update pin list")
         val tags = currentTags.toMutableList()
         if (tags.none { it.size >= 2 && it[0] == "e" && it[1] == eventId }) {
             tags.add(listOf("e", eventId))
@@ -33,21 +33,22 @@ class PinResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to unpin")
 
-        val currentTags = getPinTags()
+        val currentTags = getPinTags().requireCompleteData("update pin list")
         val tags = currentTags.filter { !(it.size >= 2 && it[0] == "e" && it[1] == eventId) }
 
         return publishPinList(signer, tags)
     }
 
     override suspend fun getPinList(): Response<List<String>> {
-        val tags = getPinTags()
+        val response = getPinTags()
+        val tags = response.data
         val eventIds = tags
             .filter { it.size >= 2 && it[0] == "e" }
             .map { it[1] }
-        return Response(eventIds)
+        return response.withData(eventIds)
     }
 
-    private suspend fun getPinTags(): List<List<String>> {
+    private suspend fun getPinTags(): Response<List<List<String>>> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get pin list")
 
@@ -57,7 +58,7 @@ class PinResourceImpl(
             limit = 1,
         )
         val response = nostr.events().queryEvents(listOf(filter))
-        return response.data.firstOrNull()?.tags ?: listOf()
+        return response.withData(response.data.firstOrNull()?.tags ?: listOf())
     }
 
     private suspend fun publishPinList(

@@ -1,5 +1,6 @@
 package work.socialhub.knostr.social.internal
 
+import kotlinx.coroutines.CancellationException
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.NostrException
@@ -10,10 +11,13 @@ import work.socialhub.knostr.entity.NostrProfile
 import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.internal.InternalUtility
 import work.socialhub.knostr.social.NostrSocialConfig
+import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.api.UserResource
 import work.socialhub.knostr.social.model.NostrRelationship
 import work.socialhub.knostr.social.model.NostrUser
 import work.socialhub.knostr.social.model.NostrUserStatus
+import work.socialhub.knostr.social.model.SocialDataBatch
+import work.socialhub.knostr.social.model.SocialDataRequest
 import work.socialhub.knostr.util.Bech32
 import work.socialhub.knostr.util.Hex
 import work.socialhub.knostr.util.toBlocking
@@ -22,11 +26,13 @@ import kotlin.time.Clock
 class UserResourceImpl(
     private val nostr: Nostr,
     private val config: NostrSocialConfig = NostrSocialConfig(),
-    private val profileCache: ProfileCache = ProfileCache(config),
+    private val socialCache: SocialCache = MemorySocialCache(config),
+    private val enrichment: EnrichmentResourceImpl = EnrichmentResourceImpl(nostr, socialCache, config),
 ) : UserResource {
 
     override suspend fun getProfile(pubkey: String): Response<NostrUser> {
-        val cached = profileCache.get(pubkey)
+        val cached = cacheGet(SocialDataRequest(userPubkeys = listOf(pubkey)))
+            .users.firstOrNull { it.pubkey == pubkey }
         if (cached != null) return Response(cached)
 
         val filter = NostrFilter(
@@ -37,16 +43,24 @@ class UserResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
         val event = response.data.firstOrNull()
         if (event == null) {
+            enrichment.requestMissing(SocialDataRequest(userPubkeys = listOf(pubkey)))
             val user = NostrUser().apply {
                 this.pubkey = pubkey
                 this.npub = Bech32.encode("npub", Hex.decode(pubkey))
             }
-            return Response(user)
+            return response.withData(user)
         }
 
         val user = SocialMapper.toUser(event)
-        profileCache.put(pubkey, user)
-        return Response(user)
+        if (response.isComplete) {
+            cachePut(SocialDataBatch(users = listOf(user)))
+        } else {
+            enrichment.request(
+                SocialDataRequest(userPubkeys = listOf(pubkey)),
+                forceRefresh = true,
+            )
+        }
+        return response.withData(user)
     }
 
     override suspend fun updateProfile(profile: NostrProfile): Response<NostrEvent> {
@@ -61,6 +75,7 @@ class UserResourceImpl(
         )
         val signed = signer.sign(unsigned)
         nostr.events().publishEvent(signed)
+        cachePut(SocialDataBatch(users = listOf(SocialMapper.toUser(signed))))
         return Response(signed)
     }
 
@@ -70,6 +85,7 @@ class UserResourceImpl(
 
         // Get current follow list
         val currentFollowing = getFollowingTags(signer.getPublicKey())
+            .requireCompleteData("update following list")
 
         // Add the new pubkey if not already following
         val tags = currentFollowing.toMutableList()
@@ -95,6 +111,7 @@ class UserResourceImpl(
 
         // Get current follow list and remove the pubkey
         val currentFollowing = getFollowingTags(signer.getPublicKey())
+            .requireCompleteData("update following list")
         val tags = currentFollowing.filter { !(it.size >= 2 && it[0] == "p" && it[1] == pubkey) }
 
         val unsigned = UnsignedEvent(
@@ -120,7 +137,7 @@ class UserResourceImpl(
             ?.let { SocialMapper.toFollowList(it) }
             ?: listOf()
 
-        return Response(followList)
+        return response.withData(followList)
     }
 
     override suspend fun getFollowers(pubkey: String, limit: Int): Response<List<String>> {
@@ -136,23 +153,47 @@ class UserResourceImpl(
             .sortedByDescending { it.createdAt }
             .distinctBy { it.pubkey }
             .map { it.pubkey }
-        return Response(followers)
+        return response.withData(followers)
     }
 
     override suspend fun getProfiles(pubkeys: List<String>): Response<List<NostrUser>> {
         if (pubkeys.isEmpty()) return Response(listOf())
 
+        val uniquePubkeys = pubkeys.distinct()
+        val cached = cacheGet(SocialDataRequest(userPubkeys = uniquePubkeys))
+            .users.associateBy { it.pubkey }
+        val missing = uniquePubkeys.filter { it !in cached }
+        if (missing.isEmpty()) {
+            return Response(uniquePubkeys.mapNotNull { cached[it] })
+        }
+
         val filter = NostrFilter(
-            authors = pubkeys,
+            authors = missing,
             kinds = listOf(EventKind.METADATA),
         )
         val response = nostr.events().queryEvents(listOf(filter))
         // Take latest metadata per pubkey
-        val users = response.data
+        val fetched = response.data
             .sortedByDescending { it.createdAt }
             .distinctBy { it.pubkey }
             .map { SocialMapper.toUser(it) }
-        return Response(users)
+        if (response.isComplete) {
+            cachePut(SocialDataBatch(users = fetched))
+        }
+
+        val fetchedByPubkey = fetched.associateBy { it.pubkey }
+        val unresolved = if (response.isComplete) {
+            missing.filter { it !in fetchedByPubkey }
+        } else {
+            missing
+        }
+        if (unresolved.isNotEmpty()) {
+            enrichment.request(
+                SocialDataRequest(userPubkeys = unresolved),
+                forceRefresh = !response.isComplete,
+            )
+        }
+        return response.withData(uniquePubkeys.mapNotNull { cached[it] ?: fetchedByPubkey[it] })
     }
 
     override suspend fun verifyNip05(address: String): Response<Boolean> {
@@ -202,18 +243,20 @@ class UserResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
         val event = response.data.firstOrNull()
         if (event == null) {
-            return Response(null)
+            return response.withData(null)
         }
 
         val statusUrl = event.tags.firstOrNull { it.size >= 2 && it[0] == "r" }?.get(1)
         val expiration = event.tags.firstOrNull { it.size >= 2 && it[0] == "expiration" }?.get(1)?.toLongOrNull()
 
-        return Response(NostrUserStatus(
-            type = type,
-            content = event.content,
-            url = statusUrl,
-            expiration = expiration,
-        ))
+        return response.withData(
+            NostrUserStatus(
+                type = type,
+                content = event.content,
+                url = statusUrl,
+                expiration = expiration,
+            )
+        )
     }
 
     override suspend fun clearStatus(type: String): Response<NostrEvent> {
@@ -234,14 +277,17 @@ class UserResourceImpl(
         val myPubkey = signer?.getPublicKey()
 
         val relationship = NostrRelationship()
+        val sourceResponses = mutableListOf<Response<*>>()
 
         // Check if I'm following them
         if (myPubkey != null) {
             val followingResponse = getFollowing(myPubkey)
+            sourceResponses.add(followingResponse)
             relationship.isFollowing = followingResponse.data.contains(pubkey)
 
             // Check if they're following me by querying their follow list
             val theirFollowingResponse = getFollowing(pubkey)
+            sourceResponses.add(theirFollowingResponse)
             relationship.isFollowedBy = theirFollowingResponse.data.contains(myPubkey)
 
             // Check if I'm muting them (kind:10000)
@@ -251,13 +297,14 @@ class UserResourceImpl(
                 limit = 1,
             )
             val muteResponse = nostr.events().queryEvents(listOf(muteFilter))
+            sourceResponses.add(muteResponse)
             val mutedPubkeys = muteResponse.data.firstOrNull()
                 ?.let { SocialMapper.toFollowList(it) }
                 ?: listOf()
             relationship.isMuting = mutedPubkeys.contains(pubkey)
         }
 
-        return Response(relationship)
+        return responseOf(relationship, *sourceResponses.toTypedArray())
     }
 
     override suspend fun getFollowersWithProfiles(pubkey: String, limit: Int): Response<List<NostrUser>> {
@@ -265,20 +312,42 @@ class UserResourceImpl(
         val followerPubkeys = followersResponse.data
 
         if (followerPubkeys.isEmpty()) {
-            return Response(listOf())
+            return followersResponse.withData(listOf())
         }
 
-        return getProfiles(followerPubkeys)
+        val profilesResponse = getProfiles(followerPubkeys)
+        return responseOf(profilesResponse.data, followersResponse, profilesResponse)
     }
 
-    private suspend fun getFollowingTags(pubkey: String): List<List<String>> {
+    private suspend fun getFollowingTags(pubkey: String): Response<List<List<String>>> {
         val filter = NostrFilter(
             authors = listOf(pubkey),
             kinds = listOf(EventKind.FOLLOW_LIST),
             limit = 1,
         )
         val response = nostr.events().queryEvents(listOf(filter))
-        return response.data.firstOrNull()?.tags ?: listOf()
+        return response.withData(response.data.firstOrNull()?.tags ?: listOf())
+    }
+
+    private suspend fun cacheGet(request: SocialDataRequest): SocialDataBatch {
+        return try {
+            socialCache.get(request)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            SocialDataBatch()
+        }
+    }
+
+    private suspend fun cachePut(batch: SocialDataBatch) {
+        if (batch.isEmpty()) return
+        try {
+            socialCache.put(batch)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Cache failures must not fail the API request.
+        }
     }
 
     override fun getProfileBlocking(pubkey: String): Response<NostrUser> {

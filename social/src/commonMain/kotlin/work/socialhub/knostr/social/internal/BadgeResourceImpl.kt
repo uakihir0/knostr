@@ -1,5 +1,6 @@
 package work.socialhub.knostr.social.internal
 
+import kotlinx.coroutines.CancellationException
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.NostrException
@@ -108,7 +109,7 @@ class BadgeResourceImpl(
             .maxByOrNull { it.createdAt }
             ?: throw NostrException("Badge not found: $dTag")
 
-        return Response(parseBadgeFromEvent(event))
+        return response.withData(parseBadgeFromEvent(event))
     }
 
     override suspend fun getProfileBadges(pubkey: String): Response<List<NostrBadge>> {
@@ -119,7 +120,7 @@ class BadgeResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val profileEvent = response.data.firstOrNull()
-            ?: return Response(listOf())
+            ?: return response.withData(listOf())
 
         // Extract badge definition a-tags
         val aTags = profileEvent.tags
@@ -128,19 +129,24 @@ class BadgeResourceImpl(
 
         // Fetch each badge definition
         val badges = mutableListOf<NostrBadge>()
+        var isComplete = response.isComplete
         for (aTag in aTags) {
-            val parts = aTag.split(":")
+            val parts = aTag.split(":", limit = 3)
             if (parts.size >= 3 && parts[0] == EventKind.BADGE_DEFINITION.toString()) {
                 try {
-                    val badge = getBadgeDefinition(parts[1], parts[2]).data
-                    badges.add(badge)
+                    val badgeResponse = getBadgeDefinition(parts[1], parts[2])
+                    badges.add(badgeResponse.data)
+                    isComplete = isComplete && badgeResponse.isComplete
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (_: Exception) {
                     // Skip badges that can't be fetched
+                    isComplete = false
                 }
             }
         }
 
-        return Response(badges)
+        return response.withData(badges.toList()).also { it.isComplete = isComplete }
     }
 
     private fun parseBadgeFromEvent(event: NostrEvent): NostrBadge {

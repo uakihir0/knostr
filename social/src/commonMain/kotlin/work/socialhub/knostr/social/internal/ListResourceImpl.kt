@@ -34,7 +34,7 @@ class ListResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to add to list")
 
-        val currentTags = getListTags(name)
+        val currentTags = getListTags(name).requireCompleteData("update people list")
         val tags = currentTags.toMutableList()
         if (tags.none { it.size >= 2 && it[0] == "p" && it[1] == pubkey }) {
             tags.add(listOf("p", pubkey))
@@ -51,7 +51,7 @@ class ListResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to remove from list")
 
-        val currentTags = getListTags(name)
+        val currentTags = getListTags(name).requireCompleteData("update people list")
         val tags = currentTags.filter { !(it.size >= 2 && it[0] == "p" && it[1] == pubkey) }
         // Ensure d-tag exists
         val finalTags = if (tags.none { it.size >= 2 && it[0] == "d" }) {
@@ -76,7 +76,7 @@ class ListResourceImpl(
         val response = nostr.events().queryEvents(listOf(filter))
         val event = response.data.firstOrNull()
             ?: throw NostrException("List not found: $name")
-        return Response(toList(event))
+        return response.withData(toList(event))
     }
 
     override suspend fun getLists(): Response<List<NostrList>> {
@@ -95,10 +95,10 @@ class ListResourceImpl(
             .sortedByDescending { it.createdAt }
             .distinctBy { e -> e.tags.firstOrNull { it.size >= 2 && it[0] == "d" }?.get(1) }
             .map { toList(it) }
-        return Response(lists)
+        return response.withData(lists)
     }
 
-    private suspend fun getListTags(name: String): List<List<String>> {
+    private suspend fun getListTags(name: String): Response<List<List<String>>> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get list")
 
@@ -109,7 +109,7 @@ class ListResourceImpl(
             limit = 1,
         )
         val response = nostr.events().queryEvents(listOf(filter))
-        return response.data.firstOrNull()?.tags ?: listOf()
+        return response.withData(response.data.firstOrNull()?.tags ?: listOf())
     }
 
     private suspend fun publishList(

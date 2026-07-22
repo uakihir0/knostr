@@ -236,6 +236,7 @@ object SocialMapper {
                         try {
                             val zapRequest = InternalUtility.fromJson<NostrEvent>(tag[1])
                             zap.message = zapRequest.content
+                            zap.senderPubkey = zapRequest.pubkey
                         } catch (_: Exception) {
                         }
                     }
@@ -283,11 +284,10 @@ object SocialMapper {
 
     /** Count likes (kind:7 reactions) for a given event ID */
     fun countLikes(reactions: List<NostrEvent>): Int {
-        return reactions.count { event ->
-            val content = event.content.trim()
-            content.isEmpty() || content == "+" || content == "❤️" || content == "❤"
-        }
+        return reactions.count { event -> isLike(event.content) }
     }
+
+    internal fun isLike(content: String): Boolean = content.isEmpty() || content == "+"
 
     /** Extract target event ID from a kind:7 reaction event */
     fun getReactionTarget(event: NostrEvent): String? {

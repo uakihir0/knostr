@@ -1,5 +1,6 @@
 package work.socialhub.knostr.social.stream
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -11,11 +12,14 @@ import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
-import work.socialhub.knostr.social.internal.ProfileCache
+import work.socialhub.knostr.social.api.EnrichmentResource
+import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.internal.SocialMapper
 import work.socialhub.knostr.social.model.NostrNote
 import work.socialhub.knostr.social.model.NostrReaction
 import work.socialhub.knostr.social.model.NostrUser
+import work.socialhub.knostr.social.model.SocialDataBatch
+import work.socialhub.knostr.social.model.SocialDataRequest
 import kotlin.time.Clock
 
 /**
@@ -25,7 +29,8 @@ import kotlin.time.Clock
  */
 class NotificationStream(
     private val nostr: Nostr,
-    private val profileCache: ProfileCache? = null,
+    private val socialCache: SocialCache,
+    private val enrichment: EnrichmentResource? = null,
 ) {
     var onMentionCallback: ((NostrNote) -> Unit)? = null
     var onReactionCallback: ((NostrReaction) -> Unit)? = null
@@ -33,10 +38,10 @@ class NotificationStream(
     var onErrorCallback: ((Exception) -> Unit)? = null
 
     private var subscriptionId: String? = null
-    private val localCache = mutableMapOf<String, NostrUser>()
-    private val cacheMutex = Mutex()
     private var scope: CoroutineScope? = null
     private var eventChannel: Channel<NostrEvent>? = null
+    private val localUsers = mutableMapOf<String, NostrUser>()
+    private val localUsersMutex = Mutex()
 
     /** Start streaming notifications for the given pubkey */
     suspend fun start(myPubkey: String) {
@@ -68,6 +73,8 @@ class NotificationStream(
                             onRepostCallback?.invoke(event)
                         }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     onErrorCallback?.invoke(e)
                 }
@@ -88,10 +95,18 @@ class NotificationStream(
         )
     }
 
-    private suspend fun resolveAuthor(pubkey: String): NostrUser? {
-        profileCache?.get(pubkey)?.let { return it }
-        cacheMutex.withLock {
-            localCache[pubkey]?.let { return it }
+    internal suspend fun resolveAuthor(pubkey: String): NostrUser? {
+        val cached = try {
+            socialCache.get(SocialDataRequest(userPubkeys = listOf(pubkey)))
+                .users.firstOrNull { it.pubkey == pubkey }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+        if (cached != null) return cached
+        localUsersMutex.withLock {
+            localUsers[pubkey]?.let { return it }
         }
         try {
             val filter = NostrFilter(
@@ -105,15 +120,34 @@ class NotificationStream(
                 .firstOrNull()
             if (event != null) {
                 val user = SocialMapper.toUser(event)
-                profileCache?.put(pubkey, user)
-                cacheMutex.withLock {
-                    localCache[pubkey] = user
+                localUsersMutex.withLock {
+                    localUsers[pubkey] = user
+                }
+                if (response.isComplete) {
+                    try {
+                        socialCache.put(SocialDataBatch(users = listOf(user)))
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // localUsers retains successfully resolved relay data.
+                    }
+                } else {
+                    enrichment?.request(
+                        SocialDataRequest(userPubkeys = listOf(pubkey)),
+                        forceRefresh = true,
+                    )
                 }
                 return user
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             // Best-effort
         }
+        enrichment?.request(
+            SocialDataRequest(userPubkeys = listOf(pubkey)),
+            forceRefresh = false,
+        )
         return null
     }
 
@@ -127,5 +161,8 @@ class NotificationStream(
         eventChannel = null
         scope?.cancel()
         scope = null
+        localUsersMutex.withLock {
+            localUsers.clear()
+        }
     }
 }

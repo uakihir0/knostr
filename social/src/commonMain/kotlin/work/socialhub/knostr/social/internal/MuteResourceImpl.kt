@@ -19,7 +19,7 @@ class MuteResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to mute")
 
-        val currentTags = getMuteTags()
+        val currentTags = getMuteTags().requireCompleteData("update mute list")
 
         // Already muted — return a no-op by re-publishing current list
         val tags = currentTags.toMutableList()
@@ -34,21 +34,22 @@ class MuteResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to unmute")
 
-        val currentTags = getMuteTags()
+        val currentTags = getMuteTags().requireCompleteData("update mute list")
         val tags = currentTags.filter { !(it.size >= 2 && it[0] == "p" && it[1] == pubkey) }
 
         return publishMuteList(signer, tags)
     }
 
     override suspend fun getMuteList(): Response<List<String>> {
-        val tags = getMuteTags()
+        val response = getMuteTags()
+        val tags = response.data
         val pubkeys = tags
             .filter { it.size >= 2 && it[0] == "p" }
             .map { it[1] }
-        return Response(pubkeys)
+        return response.withData(pubkeys)
     }
 
-    private suspend fun getMuteTags(): List<List<String>> {
+    private suspend fun getMuteTags(): Response<List<List<String>>> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get mute list")
 
@@ -58,7 +59,7 @@ class MuteResourceImpl(
             limit = 1,
         )
         val response = nostr.events().queryEvents(listOf(filter))
-        return response.data.firstOrNull()?.tags ?: listOf()
+        return response.withData(response.data.firstOrNull()?.tags ?: listOf())
     }
 
     private suspend fun publishMuteList(

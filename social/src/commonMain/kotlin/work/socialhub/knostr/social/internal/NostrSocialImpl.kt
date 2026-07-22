@@ -9,12 +9,14 @@ import work.socialhub.knostr.social.api.MessageResource
 import work.socialhub.knostr.social.api.MuteResource
 import work.socialhub.knostr.social.api.ReactionResource
 import work.socialhub.knostr.social.api.SearchResource
+import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.api.UserResource
 import work.socialhub.knostr.social.api.AppDataResource
 import work.socialhub.knostr.social.api.ArticleResource
 import work.socialhub.knostr.social.api.BadgeResource
 import work.socialhub.knostr.social.api.BookmarkResource
 import work.socialhub.knostr.social.api.ChannelResource
+import work.socialhub.knostr.social.api.EnrichmentResource
 import work.socialhub.knostr.social.api.InterestResource
 import work.socialhub.knostr.social.api.ListResource
 import work.socialhub.knostr.social.api.PinResource
@@ -28,13 +30,14 @@ class NostrSocialImpl(
     private val config: NostrSocialConfig = NostrSocialConfig(),
 ) : NostrSocial {
 
-    private val profileCache = ProfileCache(config)
-    private val feed: FeedResource = FeedResourceImpl(nostr, config, profileCache)
-    private val users: UserResource = UserResourceImpl(nostr, config, profileCache)
-    private val reactions: ReactionResource = ReactionResourceImpl(nostr)
-    private val search: SearchResource = SearchResourceImpl(nostr)
+    private val socialCache: SocialCache = config.socialCache ?: MemorySocialCache(config)
+    private val enrichment: EnrichmentResourceImpl = EnrichmentResourceImpl(nostr, socialCache, config)
+    private val feed: FeedResource = FeedResourceImpl(nostr, config, socialCache, enrichment)
+    private val users: UserResource = UserResourceImpl(nostr, config, socialCache, enrichment)
+    private val reactions: ReactionResource = ReactionResourceImpl(nostr, config, socialCache, enrichment)
+    private val search: SearchResource = SearchResourceImpl(nostr, config, socialCache, enrichment)
     private val media: MediaResource = MediaResourceImpl(nostr)
-    private val zaps: ZapResource = ZapResourceImpl(nostr)
+    private val zaps: ZapResource = ZapResourceImpl(nostr, config, socialCache, enrichment)
     private val mutes: MuteResource = MuteResourceImpl(nostr)
     private val messages: MessageResource = MessageResourceImpl(nostr)
     private val relayList: RelayListResource = RelayListResourceImpl(nostr)
@@ -68,6 +71,7 @@ class NostrSocialImpl(
     override fun badges() = badges
     override fun wallet() = wallet
     override fun appData() = appData
+    override fun enrichment(): EnrichmentResource = enrichment
+    override fun cache() = socialCache
     override fun nostr() = nostr
-    override fun profileCache() = profileCache
 }

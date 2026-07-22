@@ -2,7 +2,7 @@ package work.socialhub.knostr.internal
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.time.Clock
@@ -52,12 +52,12 @@ class EventResourceImpl(
                 },
             )
 
+            val isComplete: Boolean
             try {
-                withTimeout(config.queryTimeoutMs) {
+                isComplete = withTimeoutOrNull(config.queryTimeoutMs) {
                     eoseDeferred.await()
-                }
-            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
-                // Timeout: return what we have so far
+                    true
+                } ?: false
             } finally {
                 relayPool.unsubscribe(subId)
             }
@@ -67,7 +67,9 @@ class EventResourceImpl(
             for (event in eventChannel) {
                 events.add(event)
             }
-            return Response(events)
+            return Response<List<NostrEvent>>(events).also {
+                it.isComplete = isComplete
+            }
         } catch (e: Exception) {
             throw NostrException(e)
         }

@@ -1,5 +1,6 @@
 package work.socialhub.knostr.social.internal
 
+import kotlinx.coroutines.CancellationException
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.NostrException
@@ -7,13 +8,20 @@ import work.socialhub.knostr.api.response.Response
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.entity.UnsignedEvent
+import work.socialhub.knostr.social.NostrSocialConfig
 import work.socialhub.knostr.social.api.ReactionResource
+import work.socialhub.knostr.social.api.SocialCache
+import work.socialhub.knostr.social.model.NostrNoteStats
 import work.socialhub.knostr.social.model.NostrReaction
+import work.socialhub.knostr.social.model.SocialDataRequest
 import work.socialhub.knostr.util.toBlocking
 import kotlin.time.Clock
 
-class ReactionResourceImpl(
+internal class ReactionResourceImpl(
     private val nostr: Nostr,
+    config: NostrSocialConfig = NostrSocialConfig(),
+    private val socialCache: SocialCache = MemorySocialCache(config),
+    private val enrichment: EnrichmentResourceImpl = EnrichmentResourceImpl(nostr, socialCache, config),
 ) : ReactionResource {
 
     override suspend fun like(eventId: String, authorPubkey: String): Response<NostrEvent> {
@@ -35,7 +43,17 @@ class ReactionResourceImpl(
             content = content,
         )
         val signed = signer.sign(unsigned)
-        nostr.events().publishEvent(signed)
+        val published = nostr.events().publishEvent(signed)
+        if (published.data && SocialMapper.isLike(content)) {
+            SocialStats.adjustCached(socialCache, enrichment, eventId) {
+                NostrNoteStats(
+                    eventId = it.eventId,
+                    likeCount = it.likeCount + 1,
+                    replyCount = it.replyCount,
+                    repostCount = it.repostCount,
+                )
+            }
+        }
         return Response(signed)
     }
 
@@ -46,7 +64,8 @@ class ReactionResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val reactions = response.data.map { SocialMapper.toReaction(it) }
-        return Response(reactions)
+        populateAuthors(reactions)
+        return response.withData(reactions)
     }
 
     override suspend fun unlike(eventId: String): Response<Boolean> {
@@ -87,7 +106,25 @@ class ReactionResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val reactions = response.data.map { SocialMapper.toReaction(it) }
-        return Response(reactions)
+        populateAuthors(reactions)
+        return response.withData(reactions)
+    }
+
+    private suspend fun populateAuthors(reactions: List<NostrReaction>) {
+        if (reactions.isEmpty()) return
+        val pubkeys = reactions.map { it.event.pubkey }.distinct()
+        val users = try {
+            socialCache.get(SocialDataRequest(userPubkeys = pubkeys)).users.associateBy { it.pubkey }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyMap()
+        }
+        reactions.forEach { it.author = users[it.event.pubkey] }
+        val missing = pubkeys.filter { it !in users }
+        if (missing.isNotEmpty()) {
+            enrichment.requestMissing(SocialDataRequest(userPubkeys = missing))
+        }
     }
 
     /**
@@ -112,7 +149,18 @@ class ReactionResourceImpl(
         } ?: throw NostrException("No matching reaction found for event: $eventId")
 
         // Delete via kind:5
-        return nostr.events().deleteEvent(reactionEvent.id)
+        val deleted = nostr.events().deleteEvent(reactionEvent.id)
+        if (deleted.data && SocialMapper.isLike(reactionEvent.content)) {
+            SocialStats.adjustCached(socialCache, enrichment, eventId) {
+                NostrNoteStats(
+                    eventId = it.eventId,
+                    likeCount = (it.likeCount - 1).coerceAtLeast(0),
+                    replyCount = it.replyCount,
+                    repostCount = it.repostCount,
+                )
+            }
+        }
+        return deleted
     }
 
     override fun likeBlocking(eventId: String, authorPubkey: String): Response<NostrEvent> {

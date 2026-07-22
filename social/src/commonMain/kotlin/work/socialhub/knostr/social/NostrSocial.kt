@@ -7,12 +7,14 @@ import work.socialhub.knostr.social.api.MessageResource
 import work.socialhub.knostr.social.api.MuteResource
 import work.socialhub.knostr.social.api.ReactionResource
 import work.socialhub.knostr.social.api.SearchResource
+import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.api.UserResource
 import work.socialhub.knostr.social.api.AppDataResource
 import work.socialhub.knostr.social.api.ArticleResource
 import work.socialhub.knostr.social.api.BadgeResource
 import work.socialhub.knostr.social.api.BookmarkResource
 import work.socialhub.knostr.social.api.ChannelResource
+import work.socialhub.knostr.social.api.EnrichmentResource
 import work.socialhub.knostr.social.api.InterestResource
 import work.socialhub.knostr.social.api.ListResource
 import work.socialhub.knostr.social.api.PinResource
@@ -20,7 +22,6 @@ import work.socialhub.knostr.social.api.PollResource
 import work.socialhub.knostr.social.api.RelayListResource
 import work.socialhub.knostr.social.api.WalletResource
 import work.socialhub.knostr.social.api.ZapResource
-import work.socialhub.knostr.social.internal.ProfileCache
 import kotlin.js.JsExport
 
 @JsExport
@@ -44,6 +45,7 @@ interface NostrSocial {
     fun badges(): BadgeResource
     fun wallet(): WalletResource
     fun appData(): AppDataResource
+    fun enrichment(): EnrichmentResource
+    fun cache(): SocialCache
     fun nostr(): Nostr
-    fun profileCache(): ProfileCache
 }

@@ -20,7 +20,7 @@ class BookmarkResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to bookmark")
 
-        val currentTags = getBookmarkTags()
+        val currentTags = getBookmarkTags().requireCompleteData("update bookmarks")
         val tags = currentTags.toMutableList()
         if (tags.none { it.size >= 2 && it[0] == "e" && it[1] == eventId }) {
             tags.add(listOf("e", eventId))
@@ -33,21 +33,22 @@ class BookmarkResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to unbookmark")
 
-        val currentTags = getBookmarkTags()
+        val currentTags = getBookmarkTags().requireCompleteData("update bookmarks")
         val tags = currentTags.filter { !(it.size >= 2 && it[0] == "e" && it[1] == eventId) }
 
         return publishBookmarkList(signer, tags)
     }
 
     override suspend fun getBookmarks(): Response<List<String>> {
-        val tags = getBookmarkTags()
+        val response = getBookmarkTags()
+        val tags = response.data
         val eventIds = tags
             .filter { it.size >= 2 && it[0] == "e" }
             .map { it[1] }
-        return Response(eventIds)
+        return response.withData(eventIds)
     }
 
-    private suspend fun getBookmarkTags(): List<List<String>> {
+    private suspend fun getBookmarkTags(): Response<List<List<String>>> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get bookmarks")
 
@@ -57,7 +58,7 @@ class BookmarkResourceImpl(
             limit = 1,
         )
         val response = nostr.events().queryEvents(listOf(filter))
-        return response.data.firstOrNull()?.tags ?: listOf()
+        return response.withData(response.data.firstOrNull()?.tags ?: listOf())
     }
 
     private suspend fun publishBookmarkList(

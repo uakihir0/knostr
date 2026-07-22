@@ -1,5 +1,8 @@
 package work.socialhub.knostr.social.internal
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.NostrException
@@ -9,9 +12,13 @@ import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.social.NostrSocialConfig
 import work.socialhub.knostr.social.api.FeedResource
+import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.model.NostrNote
+import work.socialhub.knostr.social.model.NostrNoteStats
 import work.socialhub.knostr.social.model.NostrThread
 import work.socialhub.knostr.social.model.NostrUser
+import work.socialhub.knostr.social.model.SocialDataBatch
+import work.socialhub.knostr.social.model.SocialDataRequest
 import work.socialhub.knostr.util.Bech32
 import work.socialhub.knostr.util.Hex
 import work.socialhub.knostr.util.toBlocking
@@ -20,13 +27,25 @@ import kotlin.time.Clock
 class FeedResourceImpl(
     private val nostr: Nostr,
     private val config: NostrSocialConfig = NostrSocialConfig(),
-    private val profileCache: ProfileCache = ProfileCache(config),
+    private val socialCache: SocialCache = MemorySocialCache(config),
+    private val enrichment: EnrichmentResourceImpl = EnrichmentResourceImpl(nostr, socialCache, config),
 ) : FeedResource {
+    private enum class InteractionKind {
+        REPLY,
+        REPOST,
+    }
+
+    private data class LocalInteraction(
+        val targetEventId: String,
+        val kind: InteractionKind,
+    )
 
     private var cachedFollowList: List<String>? = null
     private var followListCachedAt: Long = 0
+    private val localInteractions = LinkedHashMap<String, LocalInteraction>()
+    private val localInteractionsMutex = Mutex()
 
-    private suspend fun getFollowPubkeys(): List<String> {
+    private suspend fun getFollowPubkeys(): Response<List<String>> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get home feed")
 
@@ -34,7 +53,7 @@ class FeedResourceImpl(
             val now = Clock.System.now().toEpochMilliseconds()
             val cached = cachedFollowList
             if (cached != null && (now - followListCachedAt) < config.followListCacheTtlMs) {
-                return cached
+                return Response(cached)
             }
         }
 
@@ -49,12 +68,12 @@ class FeedResourceImpl(
             ?.let { SocialMapper.toFollowList(it) }
             ?: listOf()
 
-        if (config.cacheFollowList && pubkeys.isNotEmpty()) {
+        if (config.cacheFollowList && followResponse.isComplete && pubkeys.isNotEmpty()) {
             cachedFollowList = pubkeys
             followListCachedAt = Clock.System.now().toEpochMilliseconds()
         }
 
-        return pubkeys
+        return followResponse.withData(pubkeys)
     }
 
     fun invalidateFollowListCache() {
@@ -63,10 +82,11 @@ class FeedResourceImpl(
     }
 
     override suspend fun getHomeFeed(since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
-        val followPubkeys = getFollowPubkeys()
+        val followResponse = getFollowPubkeys()
+        val followPubkeys = followResponse.data
 
         if (followPubkeys.isEmpty()) {
-            return Response(listOf())
+            return followResponse.withData(listOf())
         }
 
         // Then, get posts from followed users
@@ -79,20 +99,23 @@ class FeedResourceImpl(
         )
         val feedResponse = nostr.events().queryEvents(listOf(feedFilter))
         var notes = feedResponse.data.map { SocialMapper.toNote(it) }
+        cacheNotes(notes)
         if (excludeSensitive) {
             notes = notes.filterNot { it.isSensitive }
         }
         if (notes.isNotEmpty()) {
+            populateQuotedNotes(notes)
             populateAuthors(notes)
             populateLikeCounts(notes)
         }
 
-        return Response(notes)
+        return responseOf(notes, followResponse, feedResponse)
     }
 
     override suspend fun getNote(eventId: String): Response<NostrNote> {
         val response = getNoteInternal(eventId, visited = mutableSetOf())
         populateAuthors(listOf(response.data))
+        populateLikeCounts(listOf(response.data))
         return response
     }
 
@@ -102,6 +125,13 @@ class FeedResourceImpl(
         }
         visited.add(eventId)
 
+        val cached = cacheGet(SocialDataRequest(noteIds = listOf(eventId)))
+            .notes.firstOrNull { it.event.id == eventId }
+        if (cached != null) {
+            resolveQuotedNote(cached, visited)
+            return Response(cached)
+        }
+
         val filter = NostrFilter(
             ids = listOf(eventId),
             limit = 1,
@@ -110,27 +140,23 @@ class FeedResourceImpl(
         val event = response.data.firstOrNull()
             ?: throw NostrException("Note not found: $eventId")
         val note = SocialMapper.toNote(event)
+        cachePut(SocialDataBatch(notes = listOf(note)))
 
-        // Fetch reactions to populate likeCount
-        val reactionFilter = NostrFilter(
-            eTags = listOf(eventId),
-            kinds = listOf(EventKind.REACTION),
-            limit = 1000,
-        )
-        val reactionResponse = nostr.events().queryEvents(listOf(reactionFilter))
-        note.likeCount = SocialMapper.countLikes(reactionResponse.data)
+        resolveQuotedNote(note, visited)
 
-        // Resolve quoted note if q-tag present
-        if (note.quotedEventId != null) {
-            try {
-                val quotedResponse = getNoteInternal(note.quotedEventId!!, visited)
-                note.quotedNote = quotedResponse.data
-            } catch (_: Exception) {
-                // Ignore if quoted note not found or circular reference
-            }
+        return response.withData(note)
+    }
+
+    private suspend fun resolveQuotedNote(note: NostrNote, visited: MutableSet<String>) {
+        val quotedEventId = note.quotedEventId ?: return
+        if (note.quotedNote != null) return
+        try {
+            note.quotedNote = getNoteInternal(quotedEventId, visited).data
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            enrichment.requestMissing(SocialDataRequest(noteIds = listOf(quotedEventId)))
         }
-
-        return Response(note)
     }
 
     override suspend fun getUserFeed(pubkey: String, since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
@@ -143,14 +169,16 @@ class FeedResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         var notes = response.data.map { SocialMapper.toNote(it) }
+        cacheNotes(notes)
         if (excludeSensitive) {
             notes = notes.filterNot { it.isSensitive }
         }
         if (notes.isNotEmpty()) {
+            populateQuotedNotes(notes)
             populateAuthors(notes)
             populateLikeCounts(notes)
         }
-        return Response(notes)
+        return response.withData(notes)
     }
 
     override suspend fun getMentions(since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
@@ -166,18 +194,21 @@ class FeedResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         var notes = response.data.map { SocialMapper.toNote(it) }
+        cacheNotes(notes)
         if (excludeSensitive) {
             notes = notes.filterNot { it.isSensitive }
         }
         if (notes.isNotEmpty()) {
+            populateQuotedNotes(notes)
             populateAuthors(notes)
             populateLikeCounts(notes)
         }
-        return Response(notes)
+        return response.withData(notes)
     }
 
     override suspend fun getThread(eventId: String): Response<NostrThread> {
         val thread = NostrThread()
+        val sourceResponses = mutableListOf<Response<*>>()
 
         // Fetch the target note
         val targetFilter = NostrFilter(
@@ -186,10 +217,12 @@ class FeedResourceImpl(
             limit = 1,
         )
         val targetResponse = nostr.events().queryEvents(listOf(targetFilter))
+        sourceResponses.add(targetResponse)
         val targetEvent = targetResponse.data.firstOrNull()
             ?: throw NostrException("Note not found: $eventId")
 
         thread.rootNote = SocialMapper.toNote(targetEvent)
+        cacheNotes(listOfNotNull(thread.rootNote))
 
         // Walk ancestors (NIP-10 e-tags: root and reply markers)
         val ancestors = mutableListOf<NostrNote>()
@@ -206,6 +239,7 @@ class FeedResourceImpl(
                 limit = 1,
             )
             val parentResponse = nostr.events().queryEvents(listOf(parentFilter))
+            sourceResponses.add(parentResponse)
             val parentEvent = parentResponse.data.firstOrNull() ?: break
             ancestors.add(0, SocialMapper.toNote(parentEvent))
             currentEvent = parentEvent
@@ -218,14 +252,21 @@ class FeedResourceImpl(
             limit = 100,
         )
         val replyResponse = nostr.events().queryEvents(listOf(replyFilter))
+        sourceResponses.add(replyResponse)
         val descendants = replyResponse.data
             .filter { it.id != eventId }
             .map { SocialMapper.toNote(it) }
             .sortedBy { it.createdAt }
+        cacheNotes(ancestors + descendants)
 
         thread.replies = ancestors + descendants
-        thread.rootNote?.let { populateAuthors(listOf(it) + thread.replies) }
-        return Response(thread)
+        thread.rootNote?.let {
+            val allNotes = listOf(it) + thread.replies
+            populateQuotedNotes(allNotes)
+            populateAuthors(allNotes)
+            populateLikeCounts(allNotes)
+        }
+        return responseOf(thread, *sourceResponses.toTypedArray())
     }
 
     /** Extract the parent event ID from NIP-10 e-tags */
@@ -257,11 +298,12 @@ class FeedResourceImpl(
         val allPubkeys = targets.map { it.event.pubkey }.distinct()
         if (allPubkeys.isEmpty()) return
 
-        val resolved = mutableMapOf<String, NostrUser>()
+        val resolved = cacheGet(SocialDataRequest(userPubkeys = allPubkeys))
+            .users.associateByTo(mutableMapOf()) { it.pubkey }
         val uncached = mutableListOf<String>()
 
         for (pk in allPubkeys) {
-            val cached = profileCache.get(pk)
+            val cached = resolved[pk]
             if (cached != null) {
                 resolved[pk] = cached
             } else {
@@ -277,22 +319,26 @@ class FeedResourceImpl(
             }
         }
 
+        val missing = allPubkeys.filter { it !in resolved }
+        if (socialCache is MemorySocialCache && missing.isNotEmpty()) {
+            socialCache.getStaleUsers(missing).forEach { resolved[it.pubkey] = it }
+        }
+
         for (note in targets) {
             val author = resolved[note.event.pubkey]
             if (author != null) {
                 note.author = author
             } else {
-                val stale = profileCache.getStale(note.event.pubkey)
-                if (stale != null) {
-                    note.author = stale
-                } else {
-                    note.author = NostrUser().apply {
-                        pubkey = note.event.pubkey
-                        npub = Bech32.encode("npub", Hex.decode(note.event.pubkey))
-                        name = note.event.pubkey.take(8) + "..."
-                    }
+                note.author = NostrUser().apply {
+                    pubkey = note.event.pubkey
+                    npub = Bech32.encode("npub", Hex.decode(note.event.pubkey))
+                    name = note.event.pubkey.take(8) + "..."
                 }
             }
+        }
+
+        if (missing.isNotEmpty()) {
+            enrichment.requestMissing(SocialDataRequest(userPubkeys = missing))
         }
     }
 
@@ -314,23 +360,44 @@ class FeedResourceImpl(
         )
         val response = nostr.events().queryEvents(listOf(filter))
         val fetched = processMetadataEvents(response.data).toMutableMap()
+        val cacheable = mutableMapOf<String, NostrUser>()
+        if (response.isComplete) {
+            cacheable.putAll(fetched)
+        }
 
-        // Retry once for pubkeys that got no response
-        val missing = pubkeys.filter { it !in fetched }
-        if (missing.isNotEmpty()) {
+        // Retry missing profiles, or the full batch when the first result was incomplete.
+        val retryPubkeys = if (response.isComplete) {
+            pubkeys.filter { it !in fetched }
+        } else {
+            pubkeys
+        }
+        if (retryPubkeys.isNotEmpty()) {
             val retryFilter = NostrFilter(
-                authors = missing,
+                authors = retryPubkeys,
                 kinds = listOf(EventKind.METADATA),
             )
             try {
                 val retryResponse = nostr.events().queryEvents(listOf(retryFilter))
-                fetched.putAll(processMetadataEvents(retryResponse.data))
+                val retryFetched = processMetadataEvents(retryResponse.data)
+                fetched.putAll(retryFetched)
+                if (retryResponse.isComplete) {
+                    cacheable.putAll(retryFetched)
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 // Retry failed — proceed with what we have
             }
         }
 
-        profileCache.putAll(fetched)
+        cachePut(SocialDataBatch(users = cacheable.values.toList()))
+        val unresolved = pubkeys.filter { it !in cacheable }
+        if (unresolved.isNotEmpty()) {
+            enrichment.request(
+                SocialDataRequest(userPubkeys = unresolved),
+                forceRefresh = true,
+            )
+        }
         return fetched
     }
 
@@ -338,27 +405,74 @@ class FeedResourceImpl(
     private suspend fun populateLikeCounts(notes: List<NostrNote>) {
         if (notes.isEmpty()) return
 
-        // Collect all event IDs
         val eventIds = notes.map { it.event.id }
+        val cachedStats = cacheGet(SocialDataRequest(noteStatsEventIds = eventIds))
+            .noteStats.associateBy { it.eventId }
+        notes.forEach { note ->
+            cachedStats[note.event.id]?.let { applyStats(note, it) }
+        }
 
-        // Fetch reactions with a limit proportional to note count
-        // (cap at 5000 to avoid overwhelming relays)
-        val reactionLimit = minOf(eventIds.size * 200, 5000)
-        val reactionFilter = NostrFilter(
-            eTags = eventIds,
-            kinds = listOf(EventKind.REACTION),
-            limit = reactionLimit,
-        )
-        val reactionResponse = nostr.events().queryEvents(listOf(reactionFilter))
+        val uncachedEventIds = eventIds.filter { it !in cachedStats }
+        if (uncachedEventIds.isEmpty()) return
 
-        // Group reactions by target event ID
-        val reactionsByEvent = reactionResponse.data
-            .groupBy { SocialMapper.getReactionTarget(it) ?: "" }
+        val statsResponse = nostr.events().queryEvents(SocialStats.filters(uncachedEventIds))
+        if (statsResponse.isComplete) {
+            val stats = notes.filter { it.event.id in uncachedEventIds }.map { note ->
+                SocialStats.calculate(note.event.id, statsResponse.data).also {
+                    applyStats(note, it)
+                }
+            }
+            cachePut(SocialDataBatch(noteStats = stats))
+        } else {
+            enrichment.requestMissing(SocialDataRequest(noteStatsEventIds = uncachedEventIds))
+        }
+    }
 
-        // Populate likeCount for each note
-        for (note in notes) {
-            val reactions = reactionsByEvent[note.event.id] ?: listOf()
-            note.likeCount = SocialMapper.countLikes(reactions)
+    private suspend fun populateQuotedNotes(notes: List<NostrNote>) {
+        val unresolved = notes.filter { it.quotedEventId != null && it.quotedNote == null }
+        val targets = unresolved.mapNotNull { it.quotedEventId }.distinct()
+        if (targets.isEmpty()) return
+        val cached = cacheGet(SocialDataRequest(noteIds = targets))
+            .notes.associateBy { it.event.id }
+        unresolved.forEach { note ->
+            note.quotedEventId?.let { cached[it] }?.let { note.quotedNote = it }
+        }
+        val missing = targets.filter { it !in cached }
+        if (missing.isNotEmpty()) {
+            enrichment.requestMissing(SocialDataRequest(noteIds = missing))
+        }
+    }
+
+    private fun applyStats(note: NostrNote, stats: NostrNoteStats) {
+        note.likeCount = stats.likeCount
+        note.replyCount = stats.replyCount
+        note.repostCount = stats.repostCount
+    }
+
+    private suspend fun cacheNotes(notes: List<NostrNote>) {
+        if (notes.isNotEmpty()) {
+            cachePut(SocialDataBatch(notes = notes))
+        }
+    }
+
+    private suspend fun cacheGet(request: SocialDataRequest): SocialDataBatch {
+        return try {
+            socialCache.get(request)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            SocialDataBatch()
+        }
+    }
+
+    private suspend fun cachePut(batch: SocialDataBatch) {
+        if (batch.isEmpty()) return
+        try {
+            socialCache.put(batch)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Cache failures must not fail the API request.
         }
     }
 
@@ -418,7 +532,18 @@ class FeedResourceImpl(
             content = content,
         )
         val signed = signer.sign(unsigned)
-        nostr.events().publishEvent(signed)
+        val published = nostr.events().publishEvent(signed)
+        if (published.data) {
+            rememberInteraction(signed.id, replyToEventId, InteractionKind.REPLY)
+            SocialStats.adjustCached(socialCache, enrichment, replyToEventId) {
+                NostrNoteStats(
+                    eventId = it.eventId,
+                    likeCount = it.likeCount,
+                    replyCount = it.replyCount + 1,
+                    repostCount = it.repostCount,
+                )
+            }
+        }
         return Response(signed)
     }
 
@@ -434,7 +559,18 @@ class FeedResourceImpl(
             content = "",
         )
         val signed = signer.sign(unsigned)
-        nostr.events().publishEvent(signed)
+        val published = nostr.events().publishEvent(signed)
+        if (published.data) {
+            rememberInteraction(signed.id, eventId, InteractionKind.REPOST)
+            SocialStats.adjustCached(socialCache, enrichment, eventId) {
+                NostrNoteStats(
+                    eventId = it.eventId,
+                    likeCount = it.likeCount,
+                    replyCount = it.replyCount,
+                    repostCount = it.repostCount + 1,
+                )
+            }
+        }
         return Response(signed)
     }
 
@@ -467,7 +603,73 @@ class FeedResourceImpl(
     }
 
     override suspend fun delete(eventId: String, reason: String): Response<Boolean> {
-        return nostr.events().deleteEvent(eventId, reason)
+        val response = nostr.events().deleteEvent(eventId, reason)
+        if (response.data) {
+            val interaction = takeInteraction(eventId)
+            try {
+                socialCache.remove(
+                    SocialDataRequest(
+                        noteIds = listOf(eventId),
+                        noteStatsEventIds = listOf(eventId),
+                    )
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Cache failures must not change the successful relay result.
+            }
+            when (interaction?.kind) {
+                InteractionKind.REPLY -> {
+                    SocialStats.adjustCached(socialCache, enrichment, interaction.targetEventId) {
+                        NostrNoteStats(
+                            eventId = it.eventId,
+                            likeCount = it.likeCount,
+                            replyCount = (it.replyCount - 1).coerceAtLeast(0),
+                            repostCount = it.repostCount,
+                        )
+                    }
+                }
+
+                InteractionKind.REPOST -> {
+                    SocialStats.adjustCached(socialCache, enrichment, interaction.targetEventId) {
+                        NostrNoteStats(
+                            eventId = it.eventId,
+                            likeCount = it.likeCount,
+                            replyCount = it.replyCount,
+                            repostCount = (it.repostCount - 1).coerceAtLeast(0),
+                        )
+                    }
+                }
+
+                null -> Unit
+            }
+        }
+        return response
+    }
+
+    private suspend fun rememberInteraction(
+        eventId: String,
+        targetEventId: String,
+        kind: InteractionKind,
+    ) {
+        localInteractionsMutex.withLock {
+            if (localInteractions.size >= MAX_LOCAL_INTERACTIONS) {
+                val iterator = localInteractions.iterator()
+                repeat(LOCAL_INTERACTION_EVICT_COUNT) {
+                    if (iterator.hasNext()) {
+                        iterator.next()
+                        iterator.remove()
+                    }
+                }
+            }
+            localInteractions[eventId] = LocalInteraction(targetEventId, kind)
+        }
+    }
+
+    private suspend fun takeInteraction(eventId: String): LocalInteraction? {
+        return localInteractionsMutex.withLock {
+            localInteractions.remove(eventId)
+        }
     }
 
     override suspend fun getUserLikesFeed(pubkey: String, since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
@@ -481,12 +683,9 @@ class FeedResourceImpl(
         )
         val reactionResponse = nostr.events().queryEvents(listOf(reactionFilter))
 
-        // Filter only likes (empty content, "+", or heart) and extract target event IDs
+        // Filter only NIP-25 likes and extract target event IDs
         val targetEventIds = reactionResponse.data
-            .filter { event ->
-                val content = event.content.trim()
-                content.isEmpty() || content == "+" || content == "\u2764\ufe0f" || content == "\u2764"
-            }
+            .filter { event -> SocialMapper.isLike(event.content) }
             .mapNotNull { event ->
                 event.tags.lastOrNull { it.size >= 2 && it[0] == "e" }?.get(1)
             }
@@ -494,7 +693,7 @@ class FeedResourceImpl(
             .take(limit)
 
         if (targetEventIds.isEmpty()) {
-            return Response(listOf())
+            return reactionResponse.withData(listOf())
         }
 
         // Fetch the actual notes
@@ -505,14 +704,17 @@ class FeedResourceImpl(
         )
         val noteResponse = nostr.events().queryEvents(listOf(noteFilter))
         var notes = noteResponse.data.map { SocialMapper.toNote(it) }
+        cacheNotes(notes)
         if (excludeSensitive) {
             notes = notes.filterNot { it.isSensitive }
         }
         if (notes.isNotEmpty()) {
+            populateQuotedNotes(notes)
             populateAuthors(notes)
+            populateLikeCounts(notes)
         }
 
-        return Response(notes)
+        return responseOf(notes, reactionResponse, noteResponse)
     }
 
     override suspend fun getUserMediaFeed(pubkey: String, since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
@@ -533,16 +735,19 @@ class FeedResourceImpl(
                     event.content.contains(Regex("https?://\\S+\\.(jpg|jpeg|png|gif|webp|mp4|webm)", RegexOption.IGNORE_CASE))
             }
             .map { SocialMapper.toNote(it) }
+        cacheNotes(mediaNotes)
 
         if (excludeSensitive) {
             mediaNotes = mediaNotes.filterNot { it.isSensitive }
         }
         mediaNotes = mediaNotes.take(limit)
         if (mediaNotes.isNotEmpty()) {
+            populateQuotedNotes(mediaNotes)
             populateAuthors(mediaNotes)
+            populateLikeCounts(mediaNotes)
         }
 
-        return Response(mediaNotes)
+        return response.withData(mediaNotes)
     }
 
     override suspend fun getNoteByNpub(noteId: String): Response<NostrNote> {
@@ -605,5 +810,10 @@ class FeedResourceImpl(
 
     override fun getNoteByNpubBlocking(noteId: String): Response<NostrNote> {
         return toBlocking { getNoteByNpub(noteId) }
+    }
+
+    private companion object {
+        const val MAX_LOCAL_INTERACTIONS = 5_000
+        const val LOCAL_INTERACTION_EVICT_COUNT = 500
     }
 }

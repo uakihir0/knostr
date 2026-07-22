@@ -78,6 +78,9 @@ val response = nostr.events().queryEvents(listOf(filter))
 response.data.forEach { event ->
     println("${event.pubkey}: ${event.content}")
 }
+if (!response.isComplete) {
+    println("タイムアウトにより部分的な結果が返されました")
+}
 ```
 
 ### 投稿とフィード (Social)
@@ -141,6 +144,38 @@ social.users().unfollow("pubkey-hex")
 val verified = social.users().verifyNip05("user@example.com").data
 ```
 
+### 非同期データ補完とキャッシュ (Social)
+
+Social API はその時点の結果を返し、不足しているプロフィール、引用ノート、
+ノート統計をバックグラウンドで再取得します。元の戻り値は変更されないため、
+`pubkey` または `eventId` をキーにアプリ側の状態へ反映します。
+
+```kotlin
+val config = NostrSocialConfig().apply {
+    socialCache = appSocialCache // 任意の SocialCache 実装
+}
+val social = NostrSocialFactory.instance(nostr, config)
+
+social.enrichment().onUpdateCallback = { batch ->
+    batch.users.forEach { userStore[it.pubkey] = it }
+    batch.notes.forEach { noteStore[it.event.id] = it }
+    batch.noteStats.forEach { statsStore[it.eventId] = it }
+}
+
+// キャッシュを使わず、取得できなかったデータを明示的に再要求
+social.enrichment().request(
+    SocialDataRequest(
+        userPubkeys = listOf("pubkey-hex"),
+        noteIds = listOf("event-id"),
+        noteStatsEventIds = listOf("event-id"),
+    )
+)
+```
+
+外部から注入した `SocialCache` には `get(SocialDataRequest)`、
+`put(SocialDataBatch)`、`remove(SocialDataRequest)` が呼ばれます。
+鮮度はキャッシュ実装側で管理し、古いデータは `get` の結果から除外します。
+
 ### リアクション (Social)
 
 ```kotlin
@@ -183,7 +218,8 @@ val mutedPubkeys = social.mutes().getMuteList().data
 ### リアルタイムタイムライン (Social)
 
 ```kotlin
-val stream = TimelineStream(nostr)
+val social = NostrSocialFactory.instance(nostr)
+val stream = TimelineStream(nostr, social.cache(), social.enrichment())
 stream.onNoteCallback = { note ->
     println("新しいノート: ${note.content}")
 }
@@ -286,8 +322,9 @@ val result = nostr.nip().resolveNip05("user@example.com")
 | `media()` | `upload`, `getServerInfo` | ファイルアップロード (NIP-96) |
 | `mutes()` | `mute`, `unmute`, `getMuteList` | ユーザーミュート (NIP-51) |
 | `messages()` | `sendMessage`, `getMessages`, `getConversation`, `sendLegacyMessage`, `getLegacyMessages` | ダイレクトメッセージ (NIP-17 / NIP-04) |
+| `enrichment()` | `request`, `cancelPending`, `close` | SNSデータの非同期補完 |
 
-全メソッドに `suspend` (非同期) と `Blocking` (同期) の両方があります。
+各Socialリソースの操作には `suspend` (非同期) と `Blocking` (同期) の両方があります。
 
 ## 対応 NIP
 
