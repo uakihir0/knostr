@@ -13,6 +13,7 @@ import work.socialhub.knostr.social.api.EnrichmentResource
 import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.internal.SocialMapper
 import work.socialhub.knostr.social.model.NostrNote
+import work.socialhub.knostr.social.model.NostrUser
 import work.socialhub.knostr.social.model.SocialDataBatch
 import work.socialhub.knostr.social.model.SocialDataRequest
 import kotlin.time.Clock
@@ -32,6 +33,7 @@ class TimelineStream(
     private var subscriptionId: String? = null
     private var scope: CoroutineScope? = null
     private var eventChannel: Channel<NostrEvent>? = null
+    private val prefetchedUsers = mutableMapOf<String, NostrUser>()
 
     /** Start streaming home timeline for the given list of followed pubkeys */
     suspend fun start(followingPubkeys: List<String>) {
@@ -96,7 +98,12 @@ class TimelineStream(
                     .sortedByDescending { it.createdAt }
                     .distinctBy { it.pubkey }
                 val mapped = users.associate { it.pubkey to SocialMapper.toUser(it) }
-                socialCache.put(SocialDataBatch(users = mapped.values.toList()))
+                prefetchedUsers.putAll(mapped)
+                try {
+                    socialCache.put(SocialDataBatch(users = mapped.values.toList()))
+                } catch (_: Exception) {
+                    // Keep using prefetchedUsers when an application cache is unavailable.
+                }
                 val missing = batch.filter { it !in mapped }
                 if (missing.isNotEmpty()) {
                     enrichment?.request(
@@ -113,11 +120,14 @@ class TimelineStream(
         }
     }
 
-    private suspend fun cachedUser(pubkey: String) = try {
-        socialCache.get(SocialDataRequest(userPubkeys = listOf(pubkey)))
-            .users.firstOrNull { it.pubkey == pubkey }
-    } catch (_: Exception) {
-        null
+    private suspend fun cachedUser(pubkey: String): NostrUser? {
+        prefetchedUsers[pubkey]?.let { return it }
+        return try {
+            socialCache.get(SocialDataRequest(userPubkeys = listOf(pubkey)))
+                .users.firstOrNull { it.pubkey == pubkey }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /** Stop streaming */
@@ -130,5 +140,6 @@ class TimelineStream(
         eventChannel = null
         scope?.cancel()
         scope = null
+        prefetchedUsers.clear()
     }
 }
