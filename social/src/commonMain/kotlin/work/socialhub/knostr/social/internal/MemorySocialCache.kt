@@ -57,12 +57,24 @@ class MemorySocialCache(
         }
     }
 
+    override suspend fun remove(request: SocialDataRequest) {
+        mutex.withLock {
+            request.userPubkeys.forEach { users.remove(it) }
+            request.noteIds.forEach { notes.remove(it) }
+            request.noteStatsEventIds.forEach { noteStats.remove(it) }
+        }
+    }
+
     override fun getBlocking(request: SocialDataRequest): SocialDataBatch {
         return toBlocking { get(request) }
     }
 
     override fun putBlocking(batch: SocialDataBatch) {
         toBlocking { put(batch) }
+    }
+
+    override fun removeBlocking(request: SocialDataRequest) {
+        toBlocking { remove(request) }
     }
 
     internal suspend fun getStaleUsers(pubkeys: List<String>): List<NostrUser> {

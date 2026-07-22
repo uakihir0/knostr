@@ -172,9 +172,9 @@ social.enrichment().request(
 )
 ```
 
-外部から注入した `SocialCache` には `get(SocialDataRequest)` と
-`put(SocialDataBatch)` が呼ばれます。鮮度はキャッシュ実装側で管理し、
-古いデータは `get` の結果から除外します。
+外部から注入した `SocialCache` には `get(SocialDataRequest)`、
+`put(SocialDataBatch)`、`remove(SocialDataRequest)` が呼ばれます。
+鮮度はキャッシュ実装側で管理し、古いデータは `get` の結果から除外します。
 
 ### リアクション (Social)
 

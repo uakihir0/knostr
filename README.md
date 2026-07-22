@@ -174,9 +174,9 @@ social.enrichment().request(
 )
 ```
 
-An injected `SocialCache` receives `get(SocialDataRequest)` and
-`put(SocialDataBatch)` calls. It owns its freshness policy and should omit
-stale entries from `get`.
+An injected `SocialCache` receives `get(SocialDataRequest)`,
+`put(SocialDataBatch)`, and `remove(SocialDataRequest)` calls. It owns its
+freshness policy and should omit stale entries from `get`.
 
 ### Reactions (Social)
 
