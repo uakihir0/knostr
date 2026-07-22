@@ -2,10 +2,13 @@ package work.socialhub.knostr.social.internal
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
@@ -46,6 +49,17 @@ class EnrichmentResourceImpl(
         val stats: StatsFetchResult = StatsFetchResult(),
     )
 
+    private sealed interface Command {
+        data class Request(
+            val request: SocialDataRequest,
+            val forceRefresh: Boolean,
+        ) : Command
+
+        data class Cancel(val completion: CompletableDeferred<Unit>) : Command
+
+        data class Completed(val job: Job) : Command
+    }
+
     override var onUpdateCallback: ((SocialDataBatch) -> Unit)? = null
 
     private val pendingUsers = mutableSetOf<String>()
@@ -55,46 +69,49 @@ class EnrichmentResourceImpl(
     private val forceRefreshNotes = mutableSetOf<String>()
     private val forceRefreshStats = mutableSetOf<String>()
     private val mutex = Mutex()
-    private var scope: CoroutineScope? = newScope()
+    private val commands = Channel<Command>(Channel.UNLIMITED)
+    private val scope = newScope()
+    private val coordinator = scope.launch { coordinate() }
 
     override fun request(request: SocialDataRequest, forceRefresh: Boolean) {
         if (!config.deferredEnrichmentEnabled || request.isEmpty()) return
-        val activeScope = scope ?: return
-        activeScope.launch {
-            val uniqueRequest = mutex.withLock {
-                SocialDataRequest(
-                    userPubkeys = request.userPubkeys.distinct().filter {
-                        pendingUsers.add(it).also { added ->
-                            if (forceRefresh && !added) forceRefreshUsers.add(it)
-                        }
-                    },
-                    noteIds = request.noteIds.distinct().filter {
-                        pendingNotes.add(it).also { added ->
-                            if (forceRefresh && !added) forceRefreshNotes.add(it)
-                        }
-                    },
-                    noteStatsEventIds = request.noteStatsEventIds.distinct().filter {
-                        pendingStats.add(it).also { added ->
-                            if (forceRefresh && !added) forceRefreshStats.add(it)
-                        }
-                    },
-                )
-            }
-            if (uniqueRequest.isEmpty()) return@launch
+        commands.trySend(Command.Request(request, forceRefresh))
+    }
 
-            var released = false
-            try {
-                process(uniqueRequest, forceRefresh)
-                released = true
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                // Unexpected failures must not escape the shared enrichment scope.
-            } finally {
-                if (!released) {
-                    mutex.withLock {
-                        release(uniqueRequest)
+    private suspend fun executeRequest(request: SocialDataRequest, forceRefresh: Boolean) {
+        val uniqueRequest = mutex.withLock {
+            SocialDataRequest(
+                userPubkeys = request.userPubkeys.distinct().filter {
+                    pendingUsers.add(it).also { added ->
+                        if (forceRefresh && !added) forceRefreshUsers.add(it)
                     }
+                },
+                noteIds = request.noteIds.distinct().filter {
+                    pendingNotes.add(it).also { added ->
+                        if (forceRefresh && !added) forceRefreshNotes.add(it)
+                    }
+                },
+                noteStatsEventIds = request.noteStatsEventIds.distinct().filter {
+                    pendingStats.add(it).also { added ->
+                        if (forceRefresh && !added) forceRefreshStats.add(it)
+                    }
+                }
+            )
+        }
+        if (uniqueRequest.isEmpty()) return
+
+        var released = false
+        try {
+            process(uniqueRequest, forceRefresh)
+            released = true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Unexpected failures must not escape the shared enrichment scope.
+        } finally {
+            if (!released) {
+                mutex.withLock {
+                    release(uniqueRequest)
                 }
             }
         }
@@ -105,21 +122,15 @@ class EnrichmentResourceImpl(
     }
 
     override suspend fun cancelPending() {
-        val pendingJobs = scope
-            ?.coroutineContext
-            ?.get(kotlinx.coroutines.Job)
-            ?.children
-            ?.toList()
-            .orEmpty()
-        pendingJobs.forEach { it.cancel() }
-        pendingJobs.joinAll()
-        mutex.withLock {
-            pendingUsers.clear()
-            pendingNotes.clear()
-            pendingStats.clear()
-            forceRefreshUsers.clear()
-            forceRefreshNotes.clear()
-            forceRefreshStats.clear()
+        val completion = CompletableDeferred<Unit>()
+        if (commands.trySend(Command.Cancel(completion)).isFailure) return
+        val closeHandle = coordinator.invokeOnCompletion {
+            completion.complete(Unit)
+        }
+        try {
+            completion.await()
+        } finally {
+            closeHandle.dispose()
         }
     }
 
@@ -128,8 +139,8 @@ class EnrichmentResourceImpl(
     }
 
     override fun close() {
-        scope?.cancel()
-        scope = null
+        commands.close()
+        scope.cancel()
         onUpdateCallback = null
     }
 
@@ -327,6 +338,41 @@ class EnrichmentResourceImpl(
             throw e
         } catch (_: Exception) {
             // Client callback failures do not stop remaining enrichment work.
+        }
+    }
+
+    private suspend fun coordinate() = supervisorScope {
+        val activeJobs = mutableSetOf<Job>()
+        for (command in commands) {
+            when (command) {
+                is Command.Request -> {
+                    val job = launch {
+                        executeRequest(command.request, command.forceRefresh)
+                    }
+                    activeJobs.add(job)
+                    job.invokeOnCompletion {
+                        commands.trySend(Command.Completed(job))
+                    }
+                }
+
+                is Command.Cancel -> {
+                    val jobs = activeJobs.toList()
+                    jobs.forEach { it.cancel() }
+                    jobs.joinAll()
+                    activeJobs.removeAll(jobs.toSet())
+                    mutex.withLock {
+                        pendingUsers.clear()
+                        pendingNotes.clear()
+                        pendingStats.clear()
+                        forceRefreshUsers.clear()
+                        forceRefreshNotes.clear()
+                        forceRefreshStats.clear()
+                    }
+                    command.completion.complete(Unit)
+                }
+
+                is Command.Completed -> activeJobs.remove(command.job)
+            }
         }
     }
 
