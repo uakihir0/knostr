@@ -486,7 +486,17 @@ class FeedResourceImpl(
             content = content,
         )
         val signed = signer.sign(unsigned)
-        nostr.events().publishEvent(signed)
+        val published = nostr.events().publishEvent(signed)
+        if (published.data) {
+            SocialStats.adjustCached(socialCache, enrichment, replyToEventId) {
+                NostrNoteStats(
+                    eventId = it.eventId,
+                    likeCount = it.likeCount,
+                    replyCount = it.replyCount + 1,
+                    repostCount = it.repostCount,
+                )
+            }
+        }
         return Response(signed)
     }
 
@@ -502,7 +512,17 @@ class FeedResourceImpl(
             content = "",
         )
         val signed = signer.sign(unsigned)
-        nostr.events().publishEvent(signed)
+        val published = nostr.events().publishEvent(signed)
+        if (published.data) {
+            SocialStats.adjustCached(socialCache, enrichment, eventId) {
+                NostrNoteStats(
+                    eventId = it.eventId,
+                    likeCount = it.likeCount,
+                    replyCount = it.replyCount,
+                    repostCount = it.repostCount + 1,
+                )
+            }
+        }
         return Response(signed)
     }
 

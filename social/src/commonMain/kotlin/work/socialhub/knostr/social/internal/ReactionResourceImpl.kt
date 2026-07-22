@@ -10,6 +10,7 @@ import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.social.NostrSocialConfig
 import work.socialhub.knostr.social.api.ReactionResource
 import work.socialhub.knostr.social.api.SocialCache
+import work.socialhub.knostr.social.model.NostrNoteStats
 import work.socialhub.knostr.social.model.NostrReaction
 import work.socialhub.knostr.social.model.SocialDataRequest
 import work.socialhub.knostr.util.toBlocking
@@ -41,7 +42,17 @@ class ReactionResourceImpl(
             content = content,
         )
         val signed = signer.sign(unsigned)
-        nostr.events().publishEvent(signed)
+        val published = nostr.events().publishEvent(signed)
+        if (published.data && isLike(content)) {
+            SocialStats.adjustCached(socialCache, enrichment, eventId) {
+                NostrNoteStats(
+                    eventId = it.eventId,
+                    likeCount = it.likeCount + 1,
+                    replyCount = it.replyCount,
+                    repostCount = it.repostCount,
+                )
+            }
+        }
         return Response(signed)
     }
 
@@ -135,7 +146,26 @@ class ReactionResourceImpl(
         } ?: throw NostrException("No matching reaction found for event: $eventId")
 
         // Delete via kind:5
-        return nostr.events().deleteEvent(reactionEvent.id)
+        val deleted = nostr.events().deleteEvent(reactionEvent.id)
+        if (deleted.data && isLike(reactionEvent.content)) {
+            SocialStats.adjustCached(socialCache, enrichment, eventId) {
+                NostrNoteStats(
+                    eventId = it.eventId,
+                    likeCount = (it.likeCount - 1).coerceAtLeast(0),
+                    replyCount = it.replyCount,
+                    repostCount = it.repostCount,
+                )
+            }
+        }
+        return deleted
+    }
+
+    private fun isLike(content: String): Boolean {
+        val normalized = content.trim()
+        return normalized.isEmpty() ||
+            normalized == "+" ||
+            normalized == "\u2764\ufe0f" ||
+            normalized == "\u2764"
     }
 
     override fun likeBlocking(eventId: String, authorPubkey: String): Response<NostrEvent> {
