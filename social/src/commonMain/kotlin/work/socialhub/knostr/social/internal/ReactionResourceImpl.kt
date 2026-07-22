@@ -16,7 +16,7 @@ import work.socialhub.knostr.social.model.SocialDataRequest
 import work.socialhub.knostr.util.toBlocking
 import kotlin.time.Clock
 
-class ReactionResourceImpl(
+internal class ReactionResourceImpl(
     private val nostr: Nostr,
     config: NostrSocialConfig = NostrSocialConfig(),
     private val socialCache: SocialCache = MemorySocialCache(config),
@@ -43,7 +43,7 @@ class ReactionResourceImpl(
         )
         val signed = signer.sign(unsigned)
         val published = nostr.events().publishEvent(signed)
-        if (published.data && isLike(content)) {
+        if (published.data && SocialMapper.isLike(content)) {
             SocialStats.adjustCached(socialCache, enrichment, eventId) {
                 NostrNoteStats(
                     eventId = it.eventId,
@@ -147,7 +147,7 @@ class ReactionResourceImpl(
 
         // Delete via kind:5
         val deleted = nostr.events().deleteEvent(reactionEvent.id)
-        if (deleted.data && isLike(reactionEvent.content)) {
+        if (deleted.data && SocialMapper.isLike(reactionEvent.content)) {
             SocialStats.adjustCached(socialCache, enrichment, eventId) {
                 NostrNoteStats(
                     eventId = it.eventId,
@@ -158,14 +158,6 @@ class ReactionResourceImpl(
             }
         }
         return deleted
-    }
-
-    private fun isLike(content: String): Boolean {
-        val normalized = content.trim()
-        return normalized.isEmpty() ||
-            normalized == "+" ||
-            normalized == "\u2764\ufe0f" ||
-            normalized == "\u2764"
     }
 
     override fun likeBlocking(eventId: String, authorPubkey: String): Response<NostrEvent> {
