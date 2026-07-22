@@ -1,12 +1,19 @@
 package work.socialhub.knostr
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.relay.RelayPool
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
+@OptIn(ExperimentalAtomicApi::class)
 class RelayPoolDeduplicationTest {
     @Test
     fun eventIsDeduplicatedPerSubscription() = runTest {
@@ -33,5 +40,37 @@ class RelayPoolDeduplicationTest {
 
         assertEquals(1, firstDeliveries)
         assertEquals(1, secondDeliveries)
+    }
+
+    @Test
+    fun concurrentCopiesAreDeliveredOnlyOnce() = runTest {
+        val pool = RelayPool()
+        val connections = (1..8).map { pool.addRelay("wss://relay-$it.example") }
+        val event = NostrEvent(
+            id = "3".repeat(64),
+            pubkey = "4".repeat(64),
+            createdAt = 1,
+            kind = EventKind.TEXT_NOTE,
+            tags = listOf(),
+            content = "hello",
+            sig = "",
+        )
+        val deliveries = AtomicInt(0)
+        val subscription = pool.subscribe(
+            listOf(NostrFilter(kinds = listOf(EventKind.TEXT_NOTE))),
+            { deliveries.fetchAndAdd(1) },
+        )
+
+        withContext(Dispatchers.Default) {
+            coroutineScope {
+                repeat(100) { index ->
+                    launch {
+                        connections[index % connections.size].onEventCallback?.invoke(subscription, event)
+                    }
+                }
+            }
+        }
+
+        assertEquals(1, deliveries.load())
     }
 }
