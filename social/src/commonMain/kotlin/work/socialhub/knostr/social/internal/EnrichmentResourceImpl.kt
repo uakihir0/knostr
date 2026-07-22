@@ -6,8 +6,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
@@ -100,7 +100,14 @@ class EnrichmentResourceImpl(
     }
 
     override suspend fun cancelPending() {
-        scope?.coroutineContext?.cancelChildren()
+        val pendingJobs = scope
+            ?.coroutineContext
+            ?.get(kotlinx.coroutines.Job)
+            ?.children
+            ?.toList()
+            .orEmpty()
+        pendingJobs.forEach { it.cancel() }
+        pendingJobs.joinAll()
         mutex.withLock {
             pendingUsers.clear()
             pendingNotes.clear()
