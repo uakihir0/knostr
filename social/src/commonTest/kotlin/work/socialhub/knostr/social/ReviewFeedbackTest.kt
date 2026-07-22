@@ -27,6 +27,7 @@ import work.socialhub.knostr.social.internal.ListResourceImpl
 import work.socialhub.knostr.social.internal.MuteResourceImpl
 import work.socialhub.knostr.social.internal.PinResourceImpl
 import work.socialhub.knostr.social.internal.SearchResourceImpl
+import work.socialhub.knostr.social.internal.SocialMapper
 import work.socialhub.knostr.social.internal.UserResourceImpl
 import work.socialhub.knostr.social.model.NostrNoteStats
 import work.socialhub.knostr.social.model.SocialDataBatch
@@ -146,6 +147,63 @@ class ReviewFeedbackTest {
         releaseRefresh.complete(Unit)
         assertEquals("new", withTimeout(2_000) { refreshed.await() }.users.single().name)
         assertEquals("new", cache.stored.users.single().name)
+        enrichment.close()
+    }
+
+    @Test
+    fun noteSearchResolvesCachedQuotedNoteAuthor() = runBlocking {
+        val quoteId = "8".repeat(64)
+        val quoteAuthorPubkey = "9".repeat(64)
+        val searchResult = NostrEvent(
+            id = "2".repeat(64),
+            pubkey = pubkey,
+            createdAt = 2,
+            kind = EventKind.TEXT_NOTE,
+            tags = listOf(listOf("q", quoteId)),
+            content = "quoting",
+            sig = "",
+        )
+        val quotedNote = SocialMapper.toNote(
+            NostrEvent(
+                id = quoteId,
+                pubkey = quoteAuthorPubkey,
+                createdAt = 1,
+                kind = EventKind.TEXT_NOTE,
+                tags = listOf(),
+                content = "quoted",
+                sig = "",
+            )
+        )
+        val quotedAuthor = SocialMapper.toUser(
+            NostrEvent(
+                id = "7".repeat(64),
+                pubkey = quoteAuthorPubkey,
+                createdAt = 1,
+                kind = EventKind.METADATA,
+                tags = listOf(),
+                content = """{"name":"quoted-author"}""",
+                sig = "",
+            )
+        )
+        val cache = object : SocialCache {
+            override suspend fun get(request: SocialDataRequest): SocialDataBatch {
+                return SocialDataBatch(
+                    users = if (quoteAuthorPubkey in request.userPubkeys) listOf(quotedAuthor) else listOf(),
+                    notes = if (quoteId in request.noteIds) listOf(quotedNote) else listOf(),
+                )
+            }
+
+            override suspend fun put(batch: SocialDataBatch) = Unit
+            override suspend fun remove(request: SocialDataRequest) = Unit
+        }
+        val nostr = fakeNostr(fakeEvents(query = { Response(listOf(searchResult)) }))
+        val config = NostrSocialConfig().apply { deferredEnrichmentEnabled = false }
+        val enrichment = EnrichmentResourceImpl(nostr, cache, config)
+        val search = SearchResourceImpl(nostr, config, cache, enrichment)
+
+        val result = search.searchNotes("quoting", limit = 10).data.single()
+
+        assertEquals("quoted-author", result.quotedNote?.author?.name)
         enrichment.close()
     }
 
