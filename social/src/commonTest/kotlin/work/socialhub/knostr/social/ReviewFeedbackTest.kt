@@ -21,11 +21,17 @@ import work.socialhub.knostr.social.internal.BadgeResourceImpl
 import work.socialhub.knostr.social.internal.BookmarkResourceImpl
 import work.socialhub.knostr.social.internal.ChannelResourceImpl
 import work.socialhub.knostr.social.internal.EnrichmentResourceImpl
+import work.socialhub.knostr.social.internal.FeedResourceImpl
 import work.socialhub.knostr.social.internal.InterestResourceImpl
+import work.socialhub.knostr.social.internal.ListResourceImpl
+import work.socialhub.knostr.social.internal.MuteResourceImpl
+import work.socialhub.knostr.social.internal.PinResourceImpl
 import work.socialhub.knostr.social.internal.SearchResourceImpl
 import work.socialhub.knostr.social.internal.UserResourceImpl
+import work.socialhub.knostr.social.model.NostrNoteStats
 import work.socialhub.knostr.social.model.SocialDataBatch
 import work.socialhub.knostr.social.model.SocialDataRequest
+import work.socialhub.knostr.social.stream.NotificationStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -199,6 +205,13 @@ class ReviewFeedbackTest {
         val bookmarks = BookmarkResourceImpl(nostr)
         val channels = ChannelResourceImpl(nostr)
         val interests = InterestResourceImpl(nostr)
+        val lists = ListResourceImpl(nostr)
+        val mutes = MuteResourceImpl(nostr)
+        val pins = PinResourceImpl(nostr)
+        val config = NostrSocialConfig().apply { deferredEnrichmentEnabled = false }
+        val cache = RecordingCache()
+        val enrichment = EnrichmentResourceImpl(nostr, cache, config)
+        val users = UserResourceImpl(nostr, config, cache, enrichment)
 
         assertFailsWith<NostrException> { bookmarks.bookmark("2".repeat(64)) }
         assertFailsWith<NostrException> { bookmarks.unbookmark("2".repeat(64)) }
@@ -206,7 +219,136 @@ class ReviewFeedbackTest {
         assertFailsWith<NostrException> { channels.leaveChannel("3".repeat(64)) }
         assertFailsWith<NostrException> { interests.followHashtag("nostr") }
         assertFailsWith<NostrException> { interests.unfollowHashtag("nostr") }
+        assertFailsWith<NostrException> { lists.addToList("friends", "4".repeat(64)) }
+        assertFailsWith<NostrException> { lists.removeFromList("friends", "4".repeat(64)) }
+        assertFailsWith<NostrException> { mutes.mute("5".repeat(64)) }
+        assertFailsWith<NostrException> { mutes.unmute("5".repeat(64)) }
+        assertFailsWith<NostrException> { pins.pin("6".repeat(64)) }
+        assertFailsWith<NostrException> { pins.unpin("6".repeat(64)) }
+        assertFailsWith<NostrException> { users.follow("7".repeat(64)) }
+        assertFailsWith<NostrException> { users.unfollow("7".repeat(64)) }
         assertEquals(0, publishCalls)
+        enrichment.close()
+    }
+
+    @Test
+    fun incompleteFollowListIsNotCachedAsComplete() = runBlocking {
+        var followQueries = 0
+        val followList = event(
+            kind = EventKind.FOLLOW_LIST,
+            tags = listOf(listOf("p", "2".repeat(64))),
+        )
+        val events = fakeEvents(
+            query = { filters ->
+                when (filters.single().kinds) {
+                    listOf(EventKind.FOLLOW_LIST) -> {
+                        followQueries++
+                        Response(listOf(followList)).also { it.isComplete = false }
+                    }
+                    else -> Response(listOf())
+                }
+            },
+        )
+        val nostr = fakeNostr(events, Secp256k1Signer("1".repeat(64)))
+        val config = NostrSocialConfig().apply { deferredEnrichmentEnabled = false }
+        val cache = RecordingCache()
+        val enrichment = EnrichmentResourceImpl(nostr, cache, config)
+        val feed = FeedResourceImpl(nostr, config, cache, enrichment)
+
+        assertFalse(feed.getHomeFeed().isComplete)
+        assertFalse(feed.getHomeFeed().isComplete)
+
+        assertEquals(2, followQueries)
+        enrichment.close()
+    }
+
+    @Test
+    fun incompleteFeedProfileQueriesDoNotWriteSharedCache() = runBlocking {
+        val note = event(kind = EventKind.TEXT_NOTE, tags = listOf())
+        val oldMetadata = metadata(createdAt = 1, name = "old")
+        val events = fakeEvents(
+            query = { filters ->
+                when {
+                    filters.any { it.kinds == listOf(EventKind.TEXT_NOTE) } -> Response(listOf(note))
+                    filters.any { it.kinds == listOf(EventKind.METADATA) } ->
+                        Response(listOf(oldMetadata)).also { it.isComplete = false }
+                    else -> Response(listOf())
+                }
+            },
+        )
+        val nostr = fakeNostr(events)
+        val config = NostrSocialConfig().apply { deferredEnrichmentEnabled = false }
+        val cache = RecordingCache()
+        val enrichment = EnrichmentResourceImpl(nostr, cache, config)
+        val feed = FeedResourceImpl(nostr, config, cache, enrichment)
+
+        val response = feed.getUserFeed(pubkey)
+
+        assertEquals("old", response.data.single().author?.name)
+        assertEquals(0, cache.batches.flatMap { it.users }.size)
+        enrichment.close()
+    }
+
+    @Test
+    fun deletingLocalReplyAndRepostRestoresParentStats() = runBlocking {
+        val parentId = "2".repeat(64)
+        var stats = NostrNoteStats(parentId, likeCount = 1, replyCount = 2, repostCount = 3)
+        val cache = object : SocialCache {
+            override suspend fun get(request: SocialDataRequest): SocialDataBatch {
+                return if (parentId in request.noteStatsEventIds) {
+                    SocialDataBatch(noteStats = listOf(stats))
+                } else {
+                    SocialDataBatch()
+                }
+            }
+
+            override suspend fun put(batch: SocialDataBatch) {
+                batch.noteStats.singleOrNull()?.let { stats = it }
+            }
+
+            override suspend fun remove(request: SocialDataRequest) = Unit
+        }
+        val nostr = fakeNostr(
+            fakeEvents(query = { Response(listOf()) }),
+            Secp256k1Signer("1".repeat(64)),
+        )
+        val config = NostrSocialConfig().apply { deferredEnrichmentEnabled = false }
+        val enrichment = EnrichmentResourceImpl(nostr, cache, config)
+        val feed = FeedResourceImpl(nostr, config, cache, enrichment)
+
+        val reply = feed.reply("reply", parentId).data
+        assertEquals(3, stats.replyCount)
+        feed.delete(reply.id)
+        assertEquals(2, stats.replyCount)
+
+        val repost = feed.repost(parentId).data
+        assertEquals(4, stats.repostCount)
+        feed.delete(repost.id)
+        assertEquals(3, stats.repostCount)
+        enrichment.close()
+    }
+
+    @Test
+    fun notificationAuthorSurvivesCacheWriteFailure() = runBlocking {
+        var metadataQueries = 0
+        val events = fakeEvents(
+            query = {
+                metadataQueries++
+                Response(listOf(metadata(createdAt = 1, name = "alice")))
+            },
+        )
+        val cache = object : SocialCache {
+            override suspend fun get(request: SocialDataRequest) = SocialDataBatch()
+            override suspend fun put(batch: SocialDataBatch) {
+                throw IllegalStateException("cache unavailable")
+            }
+            override suspend fun remove(request: SocialDataRequest) = Unit
+        }
+        val stream = NotificationStream(fakeNostr(events), cache)
+
+        assertEquals("alice", stream.resolveAuthor(pubkey)?.name)
+        assertEquals("alice", stream.resolveAuthor(pubkey)?.name)
+        assertEquals(1, metadataQueries)
     }
 
     private fun event(kind: Int, tags: List<List<String>>) = NostrEvent(
@@ -232,12 +374,14 @@ class ReviewFeedbackTest {
     private class RecordingCache : SocialCache {
         var stored = SocialDataBatch()
         var putCalls = 0
+        val batches = mutableListOf<SocialDataBatch>()
 
         override suspend fun get(request: SocialDataRequest) = SocialDataBatch()
 
         override suspend fun put(batch: SocialDataBatch) {
             putCalls++
             stored = batch
+            batches.add(batch)
         }
 
         override suspend fun remove(request: SocialDataRequest) = Unit
