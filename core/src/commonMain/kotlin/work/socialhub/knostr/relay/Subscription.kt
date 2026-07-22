@@ -20,6 +20,9 @@ data class Subscription(
     private val seenEventIdsLock = AtomicInt(0)
 
     fun acceptEvent(eventId: String): Boolean = withSeenEventIdsLock {
+        if (eventId in seenEventIds) {
+            return@withSeenEventIdsLock false
+        }
         if (seenEventIds.size >= MAX_SEEN_EVENTS) {
             val iterator = seenEventIds.iterator()
             repeat(MAX_SEEN_EVENTS / 10) {
@@ -30,6 +33,7 @@ data class Subscription(
             }
         }
         seenEventIds.add(eventId)
+        true
     }
 
     fun clearSeenEvents() = withSeenEventIdsLock {

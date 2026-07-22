@@ -8,10 +8,13 @@ import kotlinx.coroutines.withContext
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.relay.RelayPool
+import work.socialhub.knostr.relay.Subscription
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalAtomicApi::class)
 class RelayPoolDeduplicationTest {
@@ -72,5 +75,17 @@ class RelayPoolDeduplicationTest {
         }
 
         assertEquals(1, deliveries.load())
+    }
+
+    @Test
+    fun duplicateAtCapacityDoesNotAdvanceEvictionWindow() {
+        val subscription = Subscription("id", listOf(), {})
+        repeat(10_000) { assertTrue(subscription.acceptEvent(it.toString())) }
+
+        assertFalse(subscription.acceptEvent("9999"))
+        assertFalse(subscription.acceptEvent("0"))
+
+        assertTrue(subscription.acceptEvent("new"))
+        assertTrue(subscription.acceptEvent("0"))
     }
 }
