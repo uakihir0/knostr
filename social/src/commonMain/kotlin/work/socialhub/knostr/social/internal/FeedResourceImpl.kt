@@ -1,6 +1,8 @@
 package work.socialhub.knostr.social.internal
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.NostrException
@@ -28,9 +30,20 @@ class FeedResourceImpl(
     private val socialCache: SocialCache = MemorySocialCache(config),
     private val enrichment: EnrichmentResourceImpl = EnrichmentResourceImpl(nostr, socialCache, config),
 ) : FeedResource {
+    private enum class InteractionKind {
+        REPLY,
+        REPOST,
+    }
+
+    private data class LocalInteraction(
+        val targetEventId: String,
+        val kind: InteractionKind,
+    )
 
     private var cachedFollowList: List<String>? = null
     private var followListCachedAt: Long = 0
+    private val localInteractions = LinkedHashMap<String, LocalInteraction>()
+    private val localInteractionsMutex = Mutex()
 
     private suspend fun getFollowPubkeys(): Response<List<String>> {
         val signer = nostr.signer()
@@ -521,6 +534,7 @@ class FeedResourceImpl(
         val signed = signer.sign(unsigned)
         val published = nostr.events().publishEvent(signed)
         if (published.data) {
+            rememberInteraction(signed.id, replyToEventId, InteractionKind.REPLY)
             SocialStats.adjustCached(socialCache, enrichment, replyToEventId) {
                 NostrNoteStats(
                     eventId = it.eventId,
@@ -547,6 +561,7 @@ class FeedResourceImpl(
         val signed = signer.sign(unsigned)
         val published = nostr.events().publishEvent(signed)
         if (published.data) {
+            rememberInteraction(signed.id, eventId, InteractionKind.REPOST)
             SocialStats.adjustCached(socialCache, enrichment, eventId) {
                 NostrNoteStats(
                     eventId = it.eventId,
@@ -590,6 +605,7 @@ class FeedResourceImpl(
     override suspend fun delete(eventId: String, reason: String): Response<Boolean> {
         val response = nostr.events().deleteEvent(eventId, reason)
         if (response.data) {
+            val interaction = takeInteraction(eventId)
             try {
                 socialCache.remove(
                     SocialDataRequest(
@@ -602,8 +618,58 @@ class FeedResourceImpl(
             } catch (_: Exception) {
                 // Cache failures must not change the successful relay result.
             }
+            when (interaction?.kind) {
+                InteractionKind.REPLY -> {
+                    SocialStats.adjustCached(socialCache, enrichment, interaction.targetEventId) {
+                        NostrNoteStats(
+                            eventId = it.eventId,
+                            likeCount = it.likeCount,
+                            replyCount = (it.replyCount - 1).coerceAtLeast(0),
+                            repostCount = it.repostCount,
+                        )
+                    }
+                }
+
+                InteractionKind.REPOST -> {
+                    SocialStats.adjustCached(socialCache, enrichment, interaction.targetEventId) {
+                        NostrNoteStats(
+                            eventId = it.eventId,
+                            likeCount = it.likeCount,
+                            replyCount = it.replyCount,
+                            repostCount = (it.repostCount - 1).coerceAtLeast(0),
+                        )
+                    }
+                }
+
+                null -> Unit
+            }
         }
         return response
+    }
+
+    private suspend fun rememberInteraction(
+        eventId: String,
+        targetEventId: String,
+        kind: InteractionKind,
+    ) {
+        localInteractionsMutex.withLock {
+            if (localInteractions.size >= MAX_LOCAL_INTERACTIONS) {
+                val iterator = localInteractions.iterator()
+                repeat(LOCAL_INTERACTION_EVICT_COUNT) {
+                    if (iterator.hasNext()) {
+                        iterator.next()
+                        iterator.remove()
+                    }
+                }
+            }
+            localInteractions[eventId] = LocalInteraction(targetEventId, kind)
+        }
+    }
+
+    private suspend fun takeInteraction(eventId: String): LocalInteraction? {
+        return localInteractionsMutex.withLock {
+            localInteractions.remove(eventId)
+        }
     }
 
     override suspend fun getUserLikesFeed(pubkey: String, since: Long?, until: Long?, limit: Int, excludeSensitive: Boolean): Response<List<NostrNote>> {
@@ -744,5 +810,10 @@ class FeedResourceImpl(
 
     override fun getNoteByNpubBlocking(noteId: String): Response<NostrNote> {
         return toBlocking { getNoteByNpub(noteId) }
+    }
+
+    private companion object {
+        const val MAX_LOCAL_INTERACTIONS = 5_000
+        const val LOCAL_INTERACTION_EVICT_COUNT = 500
     }
 }
