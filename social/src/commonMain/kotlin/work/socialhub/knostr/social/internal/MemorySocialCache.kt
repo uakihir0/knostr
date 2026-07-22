@@ -86,7 +86,7 @@ class MemorySocialCache(
     private fun <T> evictIfNeeded(cache: MutableMap<String, Entry<T>>) {
         if (cache.size <= MAX_ENTRIES) return
         val iterator = cache.iterator()
-        repeat(EVICT_COUNT) {
+        repeat(maxOf(EVICT_COUNT, cache.size - MAX_ENTRIES)) {
             if (iterator.hasNext()) {
                 iterator.next()
                 iterator.remove()
