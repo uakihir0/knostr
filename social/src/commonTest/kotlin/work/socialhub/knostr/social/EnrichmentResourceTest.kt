@@ -31,6 +31,7 @@ import work.socialhub.knostr.social.model.SocialDataRequest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class EnrichmentResourceTest {
@@ -103,6 +104,7 @@ class EnrichmentResourceTest {
             }
 
             override suspend fun put(batch: SocialDataBatch) = Unit
+            override suspend fun remove(request: SocialDataRequest) = Unit
         }
         val eventResource = fakeEvents { filter ->
             if (filter.kinds == listOf(EventKind.METADATA)) {
@@ -161,6 +163,65 @@ class EnrichmentResourceTest {
         assertEquals(pubkey.take(8) + "...", placeholderName)
         assertEquals("late-alice", batch.users.single().name)
         assertEquals(placeholderName, returnedNote.author?.name)
+        enrichment.close()
+    }
+
+    @Test
+    fun feedPropagatesIncompleteRelayResponse() = runBlocking {
+        val note = textNote(noteId, pubkey)
+        val eventResource = fakeEventsForFilters { filters ->
+            val filter = filters.singleOrNull()
+            if (filter?.authors == listOf(pubkey) && filter.kinds == listOf(EventKind.TEXT_NOTE)) {
+                Response(listOf(note)).also { it.isComplete = false }
+            } else {
+                Response(listOf())
+            }
+        }
+        val cache = RecordingCache()
+        val noRetryConfig = config().apply { deferredEnrichmentMaxAttempts = 0 }
+        val nostr = fakeNostr(eventResource)
+        val enrichment = EnrichmentResourceImpl(nostr, cache, noRetryConfig)
+        val feed = FeedResourceImpl(nostr, noRetryConfig, cache, enrichment)
+
+        val response = feed.getUserFeed(pubkey)
+
+        assertEquals(noteId, response.data.single().event.id)
+        assertFalse(response.isComplete)
+        enrichment.close()
+    }
+
+    @Test
+    fun successfulDeleteInvalidatesCachedNoteAndStats() = runBlocking {
+        val cache = RecordingCache()
+        val nostr = fakeNostr(fakeEvents { Response(listOf()) })
+        val enrichment = EnrichmentResourceImpl(nostr, cache, config())
+        val feed = FeedResourceImpl(nostr, config(), cache, enrichment)
+
+        val response = feed.delete(noteId)
+
+        assertTrue(response.data)
+        assertEquals(listOf(noteId), cache.removed.noteIds)
+        assertEquals(listOf(noteId), cache.removed.noteStatsEventIds)
+        enrichment.close()
+    }
+
+    @Test
+    fun feedCacheLookupPropagatesCancellation() = runBlocking {
+        val cache = object : SocialCache {
+            override suspend fun get(request: SocialDataRequest): SocialDataBatch {
+                throw CancellationException("cancelled")
+            }
+
+            override suspend fun put(batch: SocialDataBatch) = Unit
+            override suspend fun remove(request: SocialDataRequest) = Unit
+        }
+        val nostr = fakeNostr(fakeEvents { Response(listOf()) })
+        val enrichment = EnrichmentResourceImpl(nostr, cache, config())
+        val feed = FeedResourceImpl(nostr, config(), cache, enrichment)
+
+        assertFailsWith<CancellationException> {
+            feed.getNote(noteId)
+        }
         enrichment.close()
     }
 
@@ -417,6 +478,10 @@ class EnrichmentResourceTest {
             override suspend fun put(batch: SocialDataBatch) {
                 error("cache write failed")
             }
+
+            override suspend fun remove(request: SocialDataRequest) {
+                error("cache remove failed")
+            }
         }
         val enrichment = EnrichmentResourceImpl(fakeNostr(eventResource), failingCache, config())
         val update = CompletableDeferred<SocialDataBatch>()
@@ -507,6 +572,7 @@ class EnrichmentResourceTest {
             }
 
             override suspend fun put(batch: SocialDataBatch) = Unit
+            override suspend fun remove(request: SocialDataRequest) = Unit
         }
         val nostr = fakeNostr(fakeEvents { Response(listOf(reaction)) })
         val enrichment = EnrichmentResourceImpl(nostr, cache, config())
@@ -532,6 +598,8 @@ class EnrichmentResourceTest {
                 yield()
                 stored = batch.noteStats.single()
             }
+
+            override suspend fun remove(request: SocialDataRequest) = Unit
         }
         val nostr = fakeNostr(fakeEvents { Response(listOf()) })
         val enrichment = EnrichmentResourceImpl(nostr, cache, config())
@@ -612,11 +680,16 @@ class EnrichmentResourceTest {
         private val loaded: SocialDataBatch = SocialDataBatch(),
     ) : SocialCache {
         var stored = SocialDataBatch()
+        var removed = SocialDataRequest()
 
         override suspend fun get(request: SocialDataRequest): SocialDataBatch = loaded
 
         override suspend fun put(batch: SocialDataBatch) {
             stored = batch
+        }
+
+        override suspend fun remove(request: SocialDataRequest) {
+            removed = request
         }
     }
 }
