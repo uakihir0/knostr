@@ -1,9 +1,13 @@
 package work.socialhub.knostr.social
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.NostrConfig
@@ -18,6 +22,7 @@ import work.socialhub.knostr.signing.NostrSigner
 import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.internal.EnrichmentResourceImpl
 import work.socialhub.knostr.social.internal.FeedResourceImpl
+import work.socialhub.knostr.social.internal.ReactionResourceImpl
 import work.socialhub.knostr.social.internal.SocialMapper
 import work.socialhub.knostr.social.internal.SocialStats
 import work.socialhub.knostr.social.model.NostrNoteStats
@@ -25,6 +30,7 @@ import work.socialhub.knostr.social.model.SocialDataBatch
 import work.socialhub.knostr.social.model.SocialDataRequest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class EnrichmentResourceTest {
@@ -482,6 +488,73 @@ class EnrichmentResourceTest {
         delay(20)
 
         assertEquals(0, queries)
+    }
+
+    @Test
+    fun reactionAuthorLookupPropagatesCancellation() = runBlocking {
+        val reaction = NostrEvent(
+            id = "3".repeat(64),
+            pubkey = pubkey,
+            createdAt = 1,
+            kind = EventKind.REACTION,
+            tags = listOf(listOf("e", noteId)),
+            content = "+",
+            sig = "",
+        )
+        val cache = object : SocialCache {
+            override suspend fun get(request: SocialDataRequest): SocialDataBatch {
+                throw CancellationException("cancelled")
+            }
+
+            override suspend fun put(batch: SocialDataBatch) = Unit
+        }
+        val nostr = fakeNostr(fakeEvents { Response(listOf(reaction)) })
+        val enrichment = EnrichmentResourceImpl(nostr, cache, config())
+        val reactions = ReactionResourceImpl(nostr, config(), cache, enrichment)
+
+        assertFailsWith<CancellationException> {
+            reactions.getReactions(noteId)
+        }
+        enrichment.close()
+    }
+
+    @Test
+    fun concurrentCachedStatsAdjustmentsDoNotLoseUpdates() = runBlocking {
+        var stored = NostrNoteStats(noteId, likeCount = 1, replyCount = 2, repostCount = 3)
+        val cache = object : SocialCache {
+            override suspend fun get(request: SocialDataRequest): SocialDataBatch {
+                val snapshot = stored
+                yield()
+                return SocialDataBatch(noteStats = listOf(snapshot))
+            }
+
+            override suspend fun put(batch: SocialDataBatch) {
+                yield()
+                stored = batch.noteStats.single()
+            }
+        }
+        val nostr = fakeNostr(fakeEvents { Response(listOf()) })
+        val enrichment = EnrichmentResourceImpl(nostr, cache, config())
+
+        coroutineScope {
+            val like = async {
+                SocialStats.adjustCached(cache, enrichment, noteId) {
+                    NostrNoteStats(it.eventId, it.likeCount + 1, it.replyCount, it.repostCount)
+                }
+            }
+            val reply = async {
+                SocialStats.adjustCached(cache, enrichment, noteId) {
+                    NostrNoteStats(it.eventId, it.likeCount, it.replyCount + 1, it.repostCount)
+                }
+            }
+            like.await()
+            reply.await()
+        }
+
+        assertEquals(2, stored.likeCount)
+        assertEquals(3, stored.replyCount)
+        assertEquals(3, stored.repostCount)
+        enrichment.close()
     }
 
     private fun config() = NostrSocialConfig().apply {

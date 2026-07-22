@@ -340,4 +340,22 @@ class SocialMapperTest {
         val followList = SocialMapper.toFollowList(event)
         assertTrue(followList.isEmpty())
     }
+
+    @Test
+    fun countLikesUsesExactNip25Values() {
+        val contents = listOf("", "+", " ", " +", "\u2764", "\u2764\ufe0f")
+        val reactions = contents.mapIndexed { index, content ->
+            NostrEvent(
+                id = index.toString().padStart(64, '0'),
+                pubkey = testPubkey,
+                createdAt = index.toLong(),
+                kind = 7,
+                tags = listOf(listOf("e", eventId1)),
+                content = content,
+                sig = testSig,
+            )
+        }
+
+        assertEquals(2, SocialMapper.countLikes(reactions))
+    }
 }
