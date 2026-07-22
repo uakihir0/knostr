@@ -131,14 +131,14 @@ class TimelineStream(
     }
 
     private suspend fun cachedUser(pubkey: String): NostrUser? {
-        prefetchedUsers[pubkey]?.let { return it }
         return try {
             socialCache.get(SocialDataRequest(userPubkeys = listOf(pubkey)))
                 .users.firstOrNull { it.pubkey == pubkey }
+                ?: prefetchedUsers[pubkey]
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
-            null
+            prefetchedUsers[pubkey]
         }
     }
 
