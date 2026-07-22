@@ -52,7 +52,14 @@ class UserResourceImpl(
         }
 
         val user = SocialMapper.toUser(event)
-        cachePut(SocialDataBatch(users = listOf(user)))
+        if (response.isComplete) {
+            cachePut(SocialDataBatch(users = listOf(user)))
+        } else {
+            enrichment.request(
+                SocialDataRequest(userPubkeys = listOf(pubkey)),
+                forceRefresh = true,
+            )
+        }
         return response.withData(user)
     }
 
@@ -168,12 +175,21 @@ class UserResourceImpl(
             .sortedByDescending { it.createdAt }
             .distinctBy { it.pubkey }
             .map { SocialMapper.toUser(it) }
-        cachePut(SocialDataBatch(users = fetched))
+        if (response.isComplete) {
+            cachePut(SocialDataBatch(users = fetched))
+        }
 
         val fetchedByPubkey = fetched.associateBy { it.pubkey }
-        val unresolved = missing.filter { it !in fetchedByPubkey }
+        val unresolved = if (response.isComplete) {
+            missing.filter { it !in fetchedByPubkey }
+        } else {
+            missing
+        }
         if (unresolved.isNotEmpty()) {
-            enrichment.requestMissing(SocialDataRequest(userPubkeys = unresolved))
+            enrichment.request(
+                SocialDataRequest(userPubkeys = unresolved),
+                forceRefresh = !response.isComplete,
+            )
         }
         return response.withData(uniquePubkeys.mapNotNull { cached[it] ?: fetchedByPubkey[it] })
     }

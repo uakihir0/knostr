@@ -1,6 +1,8 @@
 package work.socialhub.knostr.social
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.NostrConfig
@@ -18,8 +20,10 @@ import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.internal.BadgeResourceImpl
 import work.socialhub.knostr.social.internal.BookmarkResourceImpl
 import work.socialhub.knostr.social.internal.ChannelResourceImpl
+import work.socialhub.knostr.social.internal.EnrichmentResourceImpl
 import work.socialhub.knostr.social.internal.InterestResourceImpl
 import work.socialhub.knostr.social.internal.SearchResourceImpl
+import work.socialhub.knostr.social.internal.UserResourceImpl
 import work.socialhub.knostr.social.model.SocialDataBatch
 import work.socialhub.knostr.social.model.SocialDataRequest
 import kotlin.test.Test
@@ -99,6 +103,46 @@ class ReviewFeedbackTest {
     }
 
     @Test
+    fun incompleteProfileQueryIsNotCachedAndQueuesRefresh() = runBlocking {
+        var queries = 0
+        val cache = RecordingCache()
+        val events = fakeEvents(
+            query = {
+                queries++
+                if (queries == 1) {
+                    Response(listOf(metadata(createdAt = 1, name = "old"))).also {
+                        it.isComplete = false
+                    }
+                } else {
+                    Response(listOf(metadata(createdAt = 2, name = "new")))
+                }
+            },
+        )
+        val nostr = fakeNostr(events)
+        val config = NostrSocialConfig().apply {
+            deferredEnrichmentInitialDelayMs = 100
+            deferredEnrichmentMaxAttempts = 1
+        }
+        val enrichment = EnrichmentResourceImpl(nostr, cache, config)
+        val refreshed = CompletableDeferred<SocialDataBatch>()
+        enrichment.onUpdateCallback = { batch ->
+            if (batch.users.singleOrNull()?.name == "new") {
+                refreshed.complete(batch)
+            }
+        }
+        val users = UserResourceImpl(nostr, config, cache, enrichment)
+
+        val response = users.getProfiles(listOf(pubkey))
+
+        assertEquals("old", response.data.single().name)
+        assertFalse(response.isComplete)
+        assertEquals(0, cache.putCalls)
+        assertEquals("new", withTimeout(2_000) { refreshed.await() }.users.single().name)
+        assertEquals("new", cache.stored.users.single().name)
+        enrichment.close()
+    }
+
+    @Test
     fun listMutationsRejectIncompleteSourceQueries() = runBlocking {
         var publishCalls = 0
         val events = fakeEvents(
@@ -146,10 +190,12 @@ class ReviewFeedbackTest {
 
     private class RecordingCache : SocialCache {
         var stored = SocialDataBatch()
+        var putCalls = 0
 
         override suspend fun get(request: SocialDataRequest) = SocialDataBatch()
 
         override suspend fun put(batch: SocialDataBatch) {
+            putCalls++
             stored = batch
         }
 
