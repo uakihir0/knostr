@@ -3,7 +3,10 @@ package work.socialhub.knostr.social.internal
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
+import work.socialhub.knostr.social.api.SocialCache
 import work.socialhub.knostr.social.model.NostrNoteStats
+import work.socialhub.knostr.social.model.SocialDataBatch
+import work.socialhub.knostr.social.model.SocialDataRequest
 
 internal object SocialStats {
     fun filters(eventIds: List<String>): List<NostrFilter> {
@@ -38,6 +41,29 @@ internal object SocialStats {
                 (it.kind == EventKind.REPOST || it.kind == EventKind.GENERIC_REPOST) &&
                     it.tags.any { tag -> tag.size >= 2 && tag[0] == "e" && tag[1] == eventId }
             },
+        )
+    }
+
+    suspend fun adjustCached(
+        cache: SocialCache,
+        enrichment: EnrichmentResourceImpl,
+        eventId: String,
+        transform: (NostrNoteStats) -> NostrNoteStats,
+    ) {
+        try {
+            val cached = cache.get(
+                SocialDataRequest(noteStatsEventIds = listOf(eventId))
+            ).noteStats.firstOrNull { it.eventId == eventId }
+            if (cached != null) {
+                cache.put(SocialDataBatch(noteStats = listOf(transform(cached))))
+                return
+            }
+        } catch (_: Exception) {
+            // Fall through to a relay-backed refresh.
+        }
+        enrichment.request(
+            SocialDataRequest(noteStatsEventIds = listOf(eventId)),
+            forceRefresh = true,
         )
     }
 
