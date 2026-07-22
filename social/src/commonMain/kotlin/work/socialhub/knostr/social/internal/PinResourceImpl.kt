@@ -20,7 +20,7 @@ class PinResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to pin")
 
-        val currentTags = getPinTags().data
+        val currentTags = getPinTags().requireCompleteData("update pin list")
         val tags = currentTags.toMutableList()
         if (tags.none { it.size >= 2 && it[0] == "e" && it[1] == eventId }) {
             tags.add(listOf("e", eventId))
@@ -33,7 +33,7 @@ class PinResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to unpin")
 
-        val currentTags = getPinTags().data
+        val currentTags = getPinTags().requireCompleteData("update pin list")
         val tags = currentTags.filter { !(it.size >= 2 && it[0] == "e" && it[1] == eventId) }
 
         return publishPinList(signer, tags)

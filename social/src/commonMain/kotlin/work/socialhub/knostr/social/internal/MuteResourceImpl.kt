@@ -19,7 +19,7 @@ class MuteResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to mute")
 
-        val currentTags = getMuteTags().data
+        val currentTags = getMuteTags().requireCompleteData("update mute list")
 
         // Already muted — return a no-op by re-publishing current list
         val tags = currentTags.toMutableList()
@@ -34,7 +34,7 @@ class MuteResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to unmute")
 
-        val currentTags = getMuteTags().data
+        val currentTags = getMuteTags().requireCompleteData("update mute list")
         val tags = currentTags.filter { !(it.size >= 2 && it[0] == "p" && it[1] == pubkey) }
 
         return publishMuteList(signer, tags)

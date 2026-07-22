@@ -85,6 +85,7 @@ class UserResourceImpl(
 
         // Get current follow list
         val currentFollowing = getFollowingTags(signer.getPublicKey())
+            .requireCompleteData("update following list")
 
         // Add the new pubkey if not already following
         val tags = currentFollowing.toMutableList()
@@ -110,6 +111,7 @@ class UserResourceImpl(
 
         // Get current follow list and remove the pubkey
         val currentFollowing = getFollowingTags(signer.getPublicKey())
+            .requireCompleteData("update following list")
         val tags = currentFollowing.filter { !(it.size >= 2 && it[0] == "p" && it[1] == pubkey) }
 
         val unsigned = UnsignedEvent(
@@ -317,14 +319,14 @@ class UserResourceImpl(
         return responseOf(profilesResponse.data, followersResponse, profilesResponse)
     }
 
-    private suspend fun getFollowingTags(pubkey: String): List<List<String>> {
+    private suspend fun getFollowingTags(pubkey: String): Response<List<List<String>>> {
         val filter = NostrFilter(
             authors = listOf(pubkey),
             kinds = listOf(EventKind.FOLLOW_LIST),
             limit = 1,
         )
         val response = nostr.events().queryEvents(listOf(filter))
-        return response.data.firstOrNull()?.tags ?: listOf()
+        return response.withData(response.data.firstOrNull()?.tags ?: listOf())
     }
 
     private suspend fun cacheGet(request: SocialDataRequest): SocialDataBatch {
