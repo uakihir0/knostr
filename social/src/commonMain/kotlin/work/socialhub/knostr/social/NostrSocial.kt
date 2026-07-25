@@ -47,5 +47,6 @@ interface NostrSocial {
     fun appData(): AppDataResource
     fun enrichment(): EnrichmentResource
     fun cache(): SocialCache
+    fun config(): NostrSocialConfig
     fun nostr(): Nostr
 }
