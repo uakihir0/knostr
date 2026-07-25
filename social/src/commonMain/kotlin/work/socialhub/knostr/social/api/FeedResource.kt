@@ -41,6 +41,7 @@ interface FeedResource {
         contentWarning: String? = null,
         expiry: Long? = null,
         sensitive: Boolean = false,
+        tags: List<List<String>> = listOf(),
     ): Response<NostrEvent>
 
     /** Repost a note (kind:6) */
@@ -99,6 +100,7 @@ interface FeedResource {
         contentWarning: String? = null,
         expiry: Long? = null,
         sensitive: Boolean = false,
+        tags: List<List<String>> = listOf(),
     ): Response<NostrEvent>
 
     @JsExport.Ignore

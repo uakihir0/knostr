@@ -503,32 +503,41 @@ class FeedResourceImpl(
         return Response(signed)
     }
 
-    override suspend fun reply(content: String, replyToEventId: String, rootEventId: String?, contentWarning: String?, expiry: Long?, sensitive: Boolean): Response<NostrEvent> {
+    override suspend fun reply(
+        content: String,
+        replyToEventId: String,
+        rootEventId: String?,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+        tags: List<List<String>>,
+    ): Response<NostrEvent> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to reply")
 
         // NIP-10: build e-tags with root/reply markers
-        val tags = mutableListOf<List<String>>()
+        val allTags = mutableListOf<List<String>>()
         val effectiveRootId = rootEventId ?: replyToEventId
-        tags.add(listOf("e", effectiveRootId, "", "root"))
+        allTags.add(listOf("e", effectiveRootId, "", "root"))
         if (effectiveRootId != replyToEventId) {
-            tags.add(listOf("e", replyToEventId, "", "reply"))
+            allTags.add(listOf("e", replyToEventId, "", "reply"))
         }
+        allTags.addAll(tags)
         if (contentWarning != null) {
-            tags.add(listOf("content-warning", contentWarning))
+            allTags.add(listOf("content-warning", contentWarning))
         }
         if (expiry != null) {
-            tags.add(listOf("expiration", expiry.toString()))
+            allTags.add(listOf("expiration", expiry.toString()))
         }
         if (sensitive && contentWarning == null) {
-            tags.add(listOf("content-warning"))
+            allTags.add(listOf("content-warning"))
         }
 
         val unsigned = UnsignedEvent(
             pubkey = signer.getPublicKey(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.TEXT_NOTE,
-            tags = tags,
+            tags = allTags,
             content = content,
         )
         val signed = signer.sign(unsigned)
@@ -784,8 +793,18 @@ class FeedResourceImpl(
         return toBlocking { post(content, tags, contentWarning, expiry, sensitive) }
     }
 
-    override fun replyBlocking(content: String, replyToEventId: String, rootEventId: String?, contentWarning: String?, expiry: Long?, sensitive: Boolean): Response<NostrEvent> {
-        return toBlocking { reply(content, replyToEventId, rootEventId, contentWarning, expiry, sensitive) }
+    override fun replyBlocking(
+        content: String,
+        replyToEventId: String,
+        rootEventId: String?,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+        tags: List<List<String>>,
+    ): Response<NostrEvent> {
+        return toBlocking {
+            reply(content, replyToEventId, rootEventId, contentWarning, expiry, sensitive, tags)
+        }
     }
 
     override fun repostBlocking(eventId: String): Response<NostrEvent> {
