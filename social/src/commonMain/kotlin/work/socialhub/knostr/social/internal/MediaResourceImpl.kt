@@ -44,7 +44,7 @@ internal interface MediaEventPublisher {
     ): Response<NostrEvent>
 }
 
-private class FeedMediaEventPublisher(
+private class FeedMediaEventPublisherImpl(
     private val feed: FeedResource,
 ) : MediaEventPublisher {
     override suspend fun post(
@@ -64,28 +64,38 @@ private class FeedMediaEventPublisher(
         expiry: Long?,
         sensitive: Boolean,
     ) = feed.reply(
-        content,
-        replyToEventId,
-        rootEventId,
-        contentWarning,
-        expiry,
-        sensitive,
-        tags,
+        content = content,
+        tags = tags,
+        replyToEventId = replyToEventId,
+        rootEventId = rootEventId,
+        contentWarning = contentWarning,
+        expiry = expiry,
+        sensitive = sensitive,
     )
 }
 
 class MediaResourceImpl private constructor(
     private val nostr: Nostr,
     private val config: NostrSocialConfig,
-    private val eventPublisher: MediaEventPublisher,
+    private val injectedEventPublisher: MediaEventPublisher?,
     private val configuredUploader: (suspend (NostrMediaUpload) -> Response<NostrMedia>)?,
 ) : MediaResource {
 
     constructor(
         nostr: Nostr,
         config: NostrSocialConfig = NostrSocialConfig(),
-        feed: FeedResource = FeedResourceImpl(nostr, config),
-    ) : this(nostr, config, FeedMediaEventPublisher(feed), null)
+    ) : this(nostr, config, null, null)
+
+    constructor(
+        nostr: Nostr,
+        config: NostrSocialConfig = NostrSocialConfig(),
+        feed: FeedResource,
+    ) : this(nostr, config, FeedMediaEventPublisherImpl(feed), null)
+
+    private val eventPublisher: MediaEventPublisher by lazy {
+        injectedEventPublisher
+            ?: FeedMediaEventPublisherImpl(FeedResourceImpl(nostr, config))
+    }
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -171,29 +181,13 @@ class MediaResourceImpl private constructor(
         media.alt = description.ifEmpty { null }
 
         if (nip94Event != null) {
-            val tags = nip94Event["tags"]?.jsonArray
-            if (tags != null) {
-                for (tagElement in tags) {
-                    val tag = tagElement.jsonArray
-                    if (tag.size < 2) continue
-                    val key = tag[0].jsonPrimitive.content
-                    val value = tag[1].jsonPrimitive.content
-                    when (key) {
-                        "url" -> media.url = value
-                        "x", "ox" -> media.sha256 = value
-                        "size" -> media.sizeBytes = value.toLongOrNull()
-                        "dim" -> {
-                            val parts = value.split("x")
-                            if (parts.size == 2) {
-                                media.width = parts[0].toIntOrNull()
-                                media.height = parts[1].toIntOrNull()
-                            }
-                        }
-                        "blurhash" -> media.blurhash = value
-                        "thumb" -> media.thumbnailUrl = value
-                        "m" -> media.mimeType = value
-                    }
-                }
+            nip94Event["tags"]?.jsonArray?.let { tags ->
+                applyNip94Tags(
+                    media,
+                    tags.map { tag ->
+                        tag.jsonArray.map { it.jsonPrimitive.content }
+                    },
+                )
             }
         }
 
@@ -467,7 +461,7 @@ class MediaResourceImpl private constructor(
             return MediaResourceImpl(
                 nostr,
                 config,
-                FeedMediaEventPublisher(feed),
+                FeedMediaEventPublisherImpl(feed),
                 uploader,
             )
         }
@@ -495,6 +489,32 @@ class MediaResourceImpl private constructor(
             return config.mediaUploadServerUrl.trim().trimEnd('/').also {
                 if (it.isEmpty()) {
                     throw NostrException("Media upload server URL must not be blank")
+                }
+            }
+        }
+
+        internal fun applyNip94Tags(
+            media: NostrMedia,
+            tags: List<List<String>>,
+        ) {
+            for (tag in tags) {
+                if (tag.size < 2) continue
+                val value = tag[1]
+                when (tag[0]) {
+                    "url" -> media.url = value
+                    "x" -> media.sha256 = value
+                    "size" -> media.sizeBytes = value.toLongOrNull()
+                    "dim" -> {
+                        val parts = value.split("x")
+                        if (parts.size == 2) {
+                            media.width = parts[0].toIntOrNull()
+                            media.height = parts[1].toIntOrNull()
+                        }
+                    }
+                    "blurhash" -> media.blurhash = value
+                    "thumb" -> media.thumbnailUrl = value
+                    "m" -> media.mimeType = value
+                    "alt" -> if (media.alt.isNullOrBlank()) media.alt = value
                 }
             }
         }
@@ -545,9 +565,8 @@ class MediaResourceImpl private constructor(
         medias: List<NostrMedia>,
         eventResponse: Response<NostrEvent>,
     ): Response<NostrMediaPost> {
-        val result = NostrMediaPost(medias.first(), eventResponse.data).apply {
-            this.medias = medias
-        }
+        val result = NostrMediaPost(medias.first(), eventResponse.data)
+        result.replaceMedias(medias)
         return Response(result).also {
             it.json = eventResponse.json
             it.isComplete = eventResponse.isComplete
