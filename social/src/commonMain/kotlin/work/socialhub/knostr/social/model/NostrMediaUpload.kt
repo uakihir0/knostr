@@ -5,8 +5,8 @@ import kotlin.js.JsExport
 /** File input for configured NIP-96 upload operations. */
 @JsExport
 class NostrMediaUpload(
-    var fileData: ByteArray,
-    var fileName: String,
-    var mimeType: String,
-    var description: String = "",
+    val fileData: ByteArray,
+    val fileName: String,
+    val mimeType: String,
+    val description: String = "",
 )
