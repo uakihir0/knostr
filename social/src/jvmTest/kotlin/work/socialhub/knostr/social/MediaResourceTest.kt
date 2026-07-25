@@ -28,8 +28,7 @@ class MediaResourceTest : AbstractTest() {
             .readBytes()
         println("Image size: ${imageBytes.size} bytes")
 
-        val response = social.media().upload(
-            serverUrl = "https://nostr.build",
+        val response = social.media().uploadToConfiguredServer(
             fileData = imageBytes,
             fileName = "200x200.png",
             mimeType = "image/png",
@@ -55,35 +54,20 @@ class MediaResourceTest : AbstractTest() {
         val scope = connectRelays(nostr)
 
         try {
-            // 1. Upload image to NIP-96 server
             val imageBytes = this::class.java.getResourceAsStream("/image/200x200.png")!!
                 .readBytes()
 
-            val uploadResponse = social.media().upload(
-                serverUrl = "https://nostr.build",
+            val response = social.media().uploadAndPost(
                 fileData = imageBytes,
                 fileName = "200x200.png",
                 mimeType = "image/png",
+                content = "knostr image post test",
                 description = "knostr image post test",
             )
-            val media = uploadResponse.data
+            val media = response.data.media
+            val event = response.data.event
             println("Uploaded: ${media.url}")
             assertTrue(media.url.isNotEmpty())
-
-            // 2. Post a note with the image URL and imeta tag
-            val imetaTag = mutableListOf("imeta", "url ${media.url}")
-            media.mimeType.let { imetaTag.add("m $it") }
-            media.blurhash?.let { imetaTag.add("blurhash $it") }
-            if (media.width != null && media.height != null) {
-                imetaTag.add("dim ${media.width}x${media.height}")
-            }
-            media.sha256?.let { imetaTag.add("x $it") }
-
-            val postResponse = social.feed().post(
-                content = "knostr image post test ${media.url}",
-                tags = listOf(imetaTag),
-            )
-            val event = postResponse.data
 
             println("Posted note: ${event.id}")
             println("  content: ${event.content}")
