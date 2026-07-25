@@ -19,6 +19,7 @@ import work.socialhub.knostr.social.model.NostrMediaUpload
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class MediaPostingUnitTest {
@@ -56,6 +57,7 @@ class MediaPostingUnitTest {
         assertEquals(listOf("first.jpg", "second.jpg"), fixture.uploadedNames)
         assertEquals(1, fixture.published.size)
         assertEquals(2, response.data.medias.size)
+        assertSame(response.data.medias.first(), response.data.media)
         assertEquals(2, event.tags.count { it.firstOrNull() == "imeta" })
         assertEquals(1, event.content.windowed(mediaUrl("first.jpg").length).count { it == mediaUrl("first.jpg") })
         assertEquals(1, event.content.windowed(mediaUrl("second.jpg").length).count { it == mediaUrl("second.jpg") })
@@ -87,7 +89,7 @@ class MediaPostingUnitTest {
     }
 
     @Test
-    fun relayFailureLeavesCompletedUploadsVisibleToCaller() = runBlocking {
+    fun relayFailureDoesNotRollBackCompletedUploads() = runBlocking {
         val fixture = fixture(failPublication = true)
 
         assertFailsWith<NostrException> {

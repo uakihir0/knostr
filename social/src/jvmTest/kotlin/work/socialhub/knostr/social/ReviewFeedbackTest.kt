@@ -210,6 +210,7 @@ class ReviewFeedbackTest {
     @Test
     fun incompleteProfileQueryIsNotCachedAndQueuesRefresh() = runBlocking {
         var queries = 0
+        val releaseRefresh = CompletableDeferred<Unit>()
         val cache = RecordingCache()
         val events = fakeEvents(
             query = {
@@ -219,13 +220,14 @@ class ReviewFeedbackTest {
                         it.isComplete = false
                     }
                 } else {
+                    releaseRefresh.await()
                     Response(listOf(metadata(createdAt = 2, name = "new")))
                 }
             },
         )
         val nostr = fakeNostr(events)
         val config = NostrSocialConfig().apply {
-            deferredEnrichmentInitialDelayMs = 100
+            deferredEnrichmentInitialDelayMs = 0
             deferredEnrichmentMaxAttempts = 1
         }
         val enrichment = EnrichmentResourceImpl(nostr, cache, config)
@@ -242,6 +244,7 @@ class ReviewFeedbackTest {
         assertEquals("old", response.data.single().name)
         assertFalse(response.isComplete)
         assertEquals(0, cache.putCalls)
+        releaseRefresh.complete(Unit)
         assertEquals("new", withTimeout(2_000) { refreshed.await() }.users.single().name)
         assertEquals("new", cache.stored.users.single().name)
         enrichment.close()
@@ -374,7 +377,10 @@ class ReviewFeedbackTest {
         val enrichment = EnrichmentResourceImpl(nostr, cache, config)
         val feed = FeedResourceImpl(nostr, config, cache, enrichment)
 
-        val reply = feed.reply("reply", parentId).data
+        val reply = feed.reply(
+            content = "reply",
+            replyToEventId = parentId,
+        ).data
         assertEquals(3, stats.replyCount)
         feed.delete(reply.id)
         assertEquals(2, stats.replyCount)

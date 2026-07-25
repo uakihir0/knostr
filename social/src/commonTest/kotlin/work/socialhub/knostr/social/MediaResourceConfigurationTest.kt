@@ -84,4 +84,28 @@ class MediaResourceConfigurationTest {
             NostrMediaTags.imeta(media),
         )
     }
+
+    @Test
+    fun nip94ResponseUsesHostedHashAndServerAlt() {
+        val media = NostrMedia()
+
+        MediaResourceImpl.applyNip94Tags(
+            media,
+            listOf(
+                listOf("ox", "original-hash"),
+                listOf("x", "hosted-hash"),
+                listOf("alt", "Server description"),
+            ),
+        )
+
+        assertEquals("hosted-hash", media.sha256)
+        assertEquals("Server description", media.alt)
+
+        val originalOnly = NostrMedia()
+        MediaResourceImpl.applyNip94Tags(
+            originalOnly,
+            listOf(listOf("ox", "original-hash")),
+        )
+        assertEquals(null, originalOnly.sha256)
+    }
 }
