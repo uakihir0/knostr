@@ -505,12 +505,12 @@ class FeedResourceImpl(
 
     override suspend fun reply(
         content: String,
+        tags: List<List<String>>,
         replyToEventId: String,
         rootEventId: String?,
         contentWarning: String?,
         expiry: Long?,
         sensitive: Boolean,
-        tags: List<List<String>>,
     ): Response<NostrEvent> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to reply")
@@ -795,15 +795,15 @@ class FeedResourceImpl(
 
     override fun replyBlocking(
         content: String,
+        tags: List<List<String>>,
         replyToEventId: String,
         rootEventId: String?,
         contentWarning: String?,
         expiry: Long?,
         sensitive: Boolean,
-        tags: List<List<String>>,
     ): Response<NostrEvent> {
         return toBlocking {
-            reply(content, replyToEventId, rootEventId, contentWarning, expiry, sensitive, tags)
+            reply(content, tags, replyToEventId, rootEventId, contentWarning, expiry, sensitive)
         }
     }
 

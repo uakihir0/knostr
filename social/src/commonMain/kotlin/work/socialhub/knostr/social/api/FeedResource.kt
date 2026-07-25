@@ -36,12 +36,12 @@ interface FeedResource {
     /** Reply to a note (NIP-10 threading) */
     suspend fun reply(
         content: String,
+        tags: List<List<String>> = listOf(),
         replyToEventId: String,
         rootEventId: String? = null,
         contentWarning: String? = null,
         expiry: Long? = null,
         sensitive: Boolean = false,
-        tags: List<List<String>> = listOf(),
     ): Response<NostrEvent>
 
     /** Repost a note (kind:6) */
@@ -95,12 +95,12 @@ interface FeedResource {
     @JsExport.Ignore
     fun replyBlocking(
         content: String,
+        tags: List<List<String>> = listOf(),
         replyToEventId: String,
         rootEventId: String? = null,
         contentWarning: String? = null,
         expiry: Long? = null,
         sensitive: Boolean = false,
-        tags: List<List<String>> = listOf(),
     ): Response<NostrEvent>
 
     @JsExport.Ignore
