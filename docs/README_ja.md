@@ -250,21 +250,59 @@ val payInfo = social.zaps().getLnurlPayInfo("user@getalby.com").data
 ### メディアアップロード (Social)
 
 ```kotlin
-val social = NostrSocialFactory.instance(nostr)
+// アカウントごとの設定。未指定時は nostr.build を使用します。
+val socialConfig = NostrSocialConfig().apply {
+    mediaUploadServerUrl = "https://nostr.build"
+}
+val social = NostrSocialFactory.instance(nostr, socialConfig)
 
-// NIP-96 サーバーのアップロード URL を取得
-val uploadUrl = social.media().getServerInfo("https://nostr.build").data
-
-// ファイルをアップロード
-val media = social.media().upload(
-    serverUrl = "https://nostr.build",
+// 設定した NIP-96 サーバーへファイルをアップロード
+val media = social.media().uploadToConfiguredServer(
     fileData = imageBytes,
     fileName = "photo.jpg",
     mimeType = "image/jpeg",
     description = "写真",
 ).data
 println("アップロード完了: ${media.url}")
+
+// アップロード後、NIP-92 の imeta タグ付き kind:1 ノートを投稿
+val post = social.media().uploadAndPost(
+    fileData = imageBytes,
+    fileName = "photo.jpg",
+    mimeType = "image/jpeg",
+    content = "今日の写真",
+    description = "海に沈む夕日",
+).data
+println("投稿完了: ${post.event.id}")
+
+// 複数画像をすべてアップロードしてから、一つのノートとして投稿
+val uploads = listOf(
+    NostrMediaUpload(firstBytes, "first.jpg", "image/jpeg", "1枚目"),
+    NostrMediaUpload(secondBytes, "second.jpg", "image/jpeg", "2枚目"),
+)
+val gallery = social.media().uploadManyAndPost(
+    uploads = uploads,
+    content = "今日の写真",
+).data
+
+// 同じアップロード処理で NIP-10 返信を一度だけ発行
+val reply = social.media().uploadAndReply(
+    uploads = uploads,
+    replyToEventId = "parent-event-id",
+    rootEventId = "root-event-id", // 省略可
+    content = "返信に写真を添付",
+).data
+
+// イベントを手動構築する場合も imeta 生成処理を再利用できます
+val imeta = NostrMediaTags.imeta(media)
+
+// アカウント設定画面などから実行時に変更することもできます
+social.config().mediaUploadServerUrl = "https://your-nip96-server.example"
 ```
+
+すべてのファイルのアップロードが完了してからイベントを発行します。一つでも
+アップロードに失敗した場合、イベントは発行しません。その後のリレー投稿に
+失敗した場合、メディアサーバーへアップロード済みのファイルは自動削除されません。
 
 ### ダイレクトメッセージ (Social)
 
@@ -319,7 +357,7 @@ val result = nostr.nip().resolveNip05("user@example.com")
 | `reactions()` | `like`, `unlike`, `react`, `unreact`, `getReactions`, `getUserReactions` | リアクション・いいね |
 | `search()` | `searchNotes`, `searchUsers` | コンテンツ検索 (NIP-50) |
 | `zaps()` | `createZapRequest`, `getZapsForEvent`, `getZapsForUser`, `getLnurlPayInfo` | Lightning Zaps (NIP-57) |
-| `media()` | `upload`, `getServerInfo` | ファイルアップロード (NIP-96) |
+| `media()` | `upload`, `uploadToConfiguredServer`, `uploadAndPost`, `uploadManyAndPost`, `uploadAndReply`, `getServerInfo` | ファイルアップロード・画像投稿・画像付き返信 (NIP-96 / NIP-92) |
 | `mutes()` | `mute`, `unmute`, `getMuteList` | ユーザーミュート (NIP-51) |
 | `messages()` | `sendMessage`, `getMessages`, `getConversation`, `sendLegacyMessage`, `getLegacyMessages` | ダイレクトメッセージ (NIP-17 / NIP-04) |
 | `enrichment()` | `request`, `cancelPending`, `close` | SNSデータの非同期補完 |
