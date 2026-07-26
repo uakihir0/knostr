@@ -46,6 +46,7 @@ class FeedResourceTest : AbstractTest() {
             // Reply to the note
             val replyResponse = social.feed().reply(
                 content = "knostr test reply",
+                tags = emptyList(),
                 replyToEventId = parentEvent.id,
             )
             val replyEvent = replyResponse.data

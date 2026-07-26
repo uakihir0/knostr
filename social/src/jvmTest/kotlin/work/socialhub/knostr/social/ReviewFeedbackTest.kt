@@ -379,6 +379,7 @@ class ReviewFeedbackTest {
 
         val reply = feed.reply(
             content = "reply",
+            tags = emptyList(),
             replyToEventId = parentId,
         ).data
         assertEquals(3, stats.replyCount)
