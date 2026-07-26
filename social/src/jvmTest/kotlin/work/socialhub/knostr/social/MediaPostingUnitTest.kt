@@ -140,6 +140,20 @@ class MediaPostingUnitTest {
         assertTrue(event.tags.any { it.firstOrNull() == "e" })
     }
 
+    @Suppress("DEPRECATION")
+    @Test
+    fun legacyReplyOverloadsDelegateToTagAwareMethods() = runBlocking {
+        val fixture = fixture()
+        val parentId = "5".repeat(64)
+
+        val asyncReply = fixture.feed.reply("Legacy async reply", parentId).data
+        val blockingReply = fixture.feed.replyBlocking("Legacy blocking reply", parentId).data
+
+        assertTrue(asyncReply.tags.contains(listOf("e", parentId, "", "root")))
+        assertTrue(blockingReply.tags.contains(listOf("e", parentId, "", "root")))
+        assertEquals(2, fixture.published.size)
+    }
+
     private fun fixture(
         failOnFileName: String? = null,
         blankUrlOnFileName: String? = null,
