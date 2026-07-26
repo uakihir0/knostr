@@ -478,7 +478,7 @@ class MediaResourceImpl private constructor(
         internal fun appendMediaUrls(content: String, mediaUrls: List<String>): String {
             var result = content
             for (mediaUrl in mediaUrls.distinct()) {
-                if (mediaUrl !in result) {
+                if (result.split(' ', '\t', '\n', '\r').none { it == mediaUrl }) {
                     result = if (result.isBlank()) mediaUrl else "$result\n$mediaUrl"
                 }
             }

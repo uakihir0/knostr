@@ -43,6 +43,7 @@ class MediaResourceConfigurationTest {
     @Test
     fun imagePostContentIncludesUploadedUrlOnce() {
         val url = "https://media.example.com/photo.jpg"
+        val largerUrl = "$url?large"
 
         assertEquals(url, MediaResourceImpl.appendMediaUrls("", listOf(url)))
         assertEquals(
@@ -52,6 +53,10 @@ class MediaResourceConfigurationTest {
         assertEquals(
             "Already here: $url",
             MediaResourceImpl.appendMediaUrls("Already here: $url", listOf(url, url)),
+        )
+        assertEquals(
+            "$largerUrl\n$url",
+            MediaResourceImpl.appendMediaUrls(largerUrl, listOf(url)),
         )
     }
 
