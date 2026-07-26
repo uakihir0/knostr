@@ -284,7 +284,7 @@ class SocialMapperTest {
         assertEquals("https://example", media.url)
         assertEquals("a nice photo", media.alt)
         assertEquals("image/png", media.mimeType)
-        assertEquals(42, media.sizeBytes)
+        assertEquals(42L, media.sizeBytes)
         assertEquals(200, media.width)
         assertEquals(300, media.height)
     }
