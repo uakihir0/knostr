@@ -5,6 +5,7 @@ import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.social.model.NostrNote
 import work.socialhub.knostr.social.model.NostrThread
 import kotlin.js.JsExport
+import kotlin.js.JsName
 
 @JsExport
 interface FeedResource {
@@ -34,6 +35,7 @@ interface FeedResource {
     ): Response<NostrEvent>
 
     /** Reply to a note (NIP-10 threading) */
+    @JsName("replyWithTags")
     suspend fun reply(
         content: String,
         tags: List<List<String>> = listOf(),
@@ -50,7 +52,6 @@ interface FeedResource {
             "reply(content, emptyList(), replyToEventId, rootEventId, contentWarning, expiry, sensitive)",
         ),
     )
-    @JsExport.Ignore
     suspend fun reply(
         content: String,
         replyToEventId: String,
