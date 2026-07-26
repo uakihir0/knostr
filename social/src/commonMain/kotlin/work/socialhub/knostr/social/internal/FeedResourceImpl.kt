@@ -556,6 +556,31 @@ class FeedResourceImpl(
         return Response(signed)
     }
 
+    @Deprecated(
+        message = "Use the overload that accepts tags",
+        replaceWith = ReplaceWith(
+            "reply(content, emptyList(), replyToEventId, rootEventId, contentWarning, expiry, sensitive)",
+        ),
+    )
+    override suspend fun reply(
+        content: String,
+        replyToEventId: String,
+        rootEventId: String?,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): Response<NostrEvent> {
+        return reply(
+            content = content,
+            tags = emptyList(),
+            replyToEventId = replyToEventId,
+            rootEventId = rootEventId,
+            contentWarning = contentWarning,
+            expiry = expiry,
+            sensitive = sensitive,
+        )
+    }
+
     override suspend fun repost(eventId: String): Response<NostrEvent> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to repost")
@@ -805,6 +830,31 @@ class FeedResourceImpl(
         return toBlocking {
             reply(content, tags, replyToEventId, rootEventId, contentWarning, expiry, sensitive)
         }
+    }
+
+    @Deprecated(
+        message = "Use the overload that accepts tags",
+        replaceWith = ReplaceWith(
+            "replyBlocking(content, emptyList(), replyToEventId, rootEventId, contentWarning, expiry, sensitive)",
+        ),
+    )
+    override fun replyBlocking(
+        content: String,
+        replyToEventId: String,
+        rootEventId: String?,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): Response<NostrEvent> {
+        return replyBlocking(
+            content = content,
+            tags = emptyList(),
+            replyToEventId = replyToEventId,
+            rootEventId = rootEventId,
+            contentWarning = contentWarning,
+            expiry = expiry,
+            sensitive = sensitive,
+        )
     }
 
     override fun repostBlocking(eventId: String): Response<NostrEvent> {

@@ -44,6 +44,22 @@ interface FeedResource {
         sensitive: Boolean = false,
     ): Response<NostrEvent>
 
+    @Deprecated(
+        message = "Use the overload that accepts tags",
+        replaceWith = ReplaceWith(
+            "reply(content, emptyList(), replyToEventId, rootEventId, contentWarning, expiry, sensitive)",
+        ),
+    )
+    @JsExport.Ignore
+    suspend fun reply(
+        content: String,
+        replyToEventId: String,
+        rootEventId: String? = null,
+        contentWarning: String? = null,
+        expiry: Long? = null,
+        sensitive: Boolean = false,
+    ): Response<NostrEvent>
+
     /** Repost a note (kind:6) */
     suspend fun repost(eventId: String): Response<NostrEvent>
 
@@ -96,6 +112,22 @@ interface FeedResource {
     fun replyBlocking(
         content: String,
         tags: List<List<String>> = listOf(),
+        replyToEventId: String,
+        rootEventId: String? = null,
+        contentWarning: String? = null,
+        expiry: Long? = null,
+        sensitive: Boolean = false,
+    ): Response<NostrEvent>
+
+    @Deprecated(
+        message = "Use the overload that accepts tags",
+        replaceWith = ReplaceWith(
+            "replyBlocking(content, emptyList(), replyToEventId, rootEventId, contentWarning, expiry, sensitive)",
+        ),
+    )
+    @JsExport.Ignore
+    fun replyBlocking(
+        content: String,
         replyToEventId: String,
         rootEventId: String? = null,
         contentWarning: String? = null,
