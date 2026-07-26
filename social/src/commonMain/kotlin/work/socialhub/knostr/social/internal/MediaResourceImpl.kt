@@ -81,17 +81,6 @@ class MediaResourceImpl private constructor(
     private val configuredUploader: (suspend (NostrMediaUpload) -> Response<NostrMedia>)?,
 ) : MediaResource {
 
-    constructor(
-        nostr: Nostr,
-        config: NostrSocialConfig = NostrSocialConfig(),
-    ) : this(nostr, config, null, null)
-
-    constructor(
-        nostr: Nostr,
-        config: NostrSocialConfig = NostrSocialConfig(),
-        feed: FeedResource,
-    ) : this(nostr, config, FeedMediaEventPublisherImpl(feed), null)
-
     private val eventPublisher: MediaEventPublisher by lazy {
         injectedEventPublisher
             ?: FeedMediaEventPublisherImpl(FeedResourceImpl(nostr, config))
@@ -451,6 +440,19 @@ class MediaResourceImpl private constructor(
 
     companion object {
         private val BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+        internal fun create(
+            nostr: Nostr,
+            config: NostrSocialConfig,
+            feed: FeedResource,
+        ): MediaResourceImpl {
+            return MediaResourceImpl(
+                nostr,
+                config,
+                FeedMediaEventPublisherImpl(feed),
+                null,
+            )
+        }
 
         internal fun withConfiguredUploader(
             nostr: Nostr,

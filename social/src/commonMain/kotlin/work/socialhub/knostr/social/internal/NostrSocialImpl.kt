@@ -36,7 +36,7 @@ class NostrSocialImpl(
     private val users: UserResource = UserResourceImpl(nostr, config, socialCache, enrichment)
     private val reactions: ReactionResource = ReactionResourceImpl(nostr, config, socialCache, enrichment)
     private val search: SearchResource = SearchResourceImpl(nostr, config, socialCache, enrichment)
-    private val media: MediaResource = MediaResourceImpl(nostr, config, feed)
+    private val media: MediaResource = MediaResourceImpl.create(nostr, config, feed)
     private val zaps: ZapResource = ZapResourceImpl(nostr, config, socialCache, enrichment)
     private val mutes: MuteResource = MuteResourceImpl(nostr)
     private val messages: MessageResource = MessageResourceImpl(nostr)
