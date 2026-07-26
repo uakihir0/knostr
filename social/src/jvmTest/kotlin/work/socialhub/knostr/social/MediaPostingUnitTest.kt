@@ -24,6 +24,17 @@ import kotlin.test.assertTrue
 
 class MediaPostingUnitTest {
 
+    @Suppress("DEPRECATION")
+    @Test
+    fun legacyMediaResourceConstructorKeepsJvmDescriptor() {
+        val nostr = fakeNostr(mutableListOf(), failPublication = false)
+
+        MediaResourceImpl(nostr)
+
+        val constructor = MediaResourceImpl::class.java.getConstructor(Nostr::class.java)
+        assertEquals(listOf(Nostr::class.java), constructor.parameterTypes.toList())
+    }
+
     @Test
     fun singleImagePostKeepsAltAndDoesNotDuplicateUrl() = runBlocking {
         val fixture = fixture()

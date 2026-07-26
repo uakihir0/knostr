@@ -81,6 +81,14 @@ class MediaResourceImpl private constructor(
     private val configuredUploader: (suspend (NostrMediaUpload) -> Response<NostrMedia>)?,
 ) : MediaResource {
 
+    @Deprecated("Use NostrSocialFactory.instance(nostr).media()")
+    constructor(nostr: Nostr) : this(
+        nostr = nostr,
+        config = NostrSocialConfig(),
+        injectedEventPublisher = null,
+        configuredUploader = null,
+    )
+
     private val eventPublisher: MediaEventPublisher by lazy {
         injectedEventPublisher
             ?: FeedMediaEventPublisherImpl(FeedResourceImpl(nostr, config))
