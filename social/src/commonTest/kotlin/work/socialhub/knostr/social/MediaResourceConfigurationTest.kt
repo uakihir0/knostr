@@ -55,6 +55,14 @@ class MediaResourceConfigurationTest {
             MediaResourceImpl.appendMediaUrls("Already here: $url", listOf(url, url)),
         )
         assertEquals(
+            "See ($url)",
+            MediaResourceImpl.appendMediaUrls("See ($url)", listOf(url)),
+        )
+        assertEquals(
+            "See $url.",
+            MediaResourceImpl.appendMediaUrls("See $url.", listOf(url)),
+        )
+        assertEquals(
             "$largerUrl\n$url",
             MediaResourceImpl.appendMediaUrls(largerUrl, listOf(url)),
         )

@@ -488,11 +488,46 @@ class MediaResourceImpl private constructor(
         internal fun appendMediaUrls(content: String, mediaUrls: List<String>): String {
             var result = content
             for (mediaUrl in mediaUrls.distinct()) {
-                if (result.split(' ', '\t', '\n', '\r').none { it == mediaUrl }) {
+                if (!containsCompleteMediaUrl(result, mediaUrl)) {
                     result = if (result.isBlank()) mediaUrl else "$result\n$mediaUrl"
                 }
             }
             return result
+        }
+
+        private fun containsCompleteMediaUrl(content: String, mediaUrl: String): Boolean {
+            if (mediaUrl.isEmpty()) return true
+
+            var startIndex = content.indexOf(mediaUrl)
+            while (startIndex >= 0) {
+                val endIndex = startIndex + mediaUrl.length
+                if (
+                    hasLeadingUrlBoundary(content, startIndex) &&
+                    hasTrailingUrlBoundary(content, endIndex)
+                ) {
+                    return true
+                }
+                startIndex = content.indexOf(mediaUrl, startIndex + 1)
+            }
+            return false
+        }
+
+        private fun hasLeadingUrlBoundary(content: String, startIndex: Int): Boolean {
+            if (startIndex == 0) return true
+            val preceding = content[startIndex - 1]
+            return preceding.isWhitespace() || preceding in "([<{\"'"
+        }
+
+        private fun hasTrailingUrlBoundary(content: String, endIndex: Int): Boolean {
+            if (endIndex == content.length) return true
+            val following = content[endIndex]
+            if (following.isWhitespace() || following in ")]}>\"'") return true
+            if (following !in ".,;:!?") return false
+
+            val afterPunctuation = content.getOrNull(endIndex + 1)
+            return afterPunctuation == null ||
+                afterPunctuation.isWhitespace() ||
+                afterPunctuation in ")]}>\"'"
         }
 
         internal fun configuredServerUrl(config: NostrSocialConfig): String {
