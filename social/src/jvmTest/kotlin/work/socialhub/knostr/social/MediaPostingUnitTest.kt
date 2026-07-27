@@ -100,6 +100,25 @@ class MediaPostingUnitTest {
     }
 
     @Test
+    fun blankUploadedAltFallsBackToInputDescription() = runBlocking {
+        val fixture = fixture(blankAltOnFileName = "photo.jpg")
+
+        val response = fixture.media.uploadAndPost(
+            fileData = byteArrayOf(1),
+            fileName = "photo.jpg",
+            mimeType = "image/jpeg",
+            description = "Input description",
+        )
+
+        assertEquals("Input description", response.data.media.alt)
+        assertTrue(
+            response.data.event.tags
+                .single { it.firstOrNull() == "imeta" }
+                .contains("alt Input description"),
+        )
+    }
+
+    @Test
     fun relayFailureDoesNotRollBackCompletedUploads() = runBlocking {
         val fixture = fixture(failPublication = true)
 
@@ -168,6 +187,7 @@ class MediaPostingUnitTest {
     private fun fixture(
         failOnFileName: String? = null,
         blankUrlOnFileName: String? = null,
+        blankAltOnFileName: String? = null,
         failPublication: Boolean = false,
     ): Fixture {
         val published = mutableListOf<NostrEvent>()
@@ -182,6 +202,7 @@ class MediaPostingUnitTest {
             }
             Response(media(input.fileName, input.description).apply {
                 if (input.fileName == blankUrlOnFileName) url = ""
+                if (input.fileName == blankAltOnFileName) alt = " "
             })
         }
         return Fixture(feed, media, published, uploadedNames)

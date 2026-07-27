@@ -601,7 +601,9 @@ class MediaResourceImpl private constructor(
                 }
                 if (fileName == null) fileName = input.fileName
                 if (mimeType == null) mimeType = input.mimeType
-                if (alt == null && input.description.isNotEmpty()) alt = input.description
+                if (alt.isNullOrBlank() && input.description.isNotBlank()) {
+                    alt = input.description
+                }
             }
         }
     }
