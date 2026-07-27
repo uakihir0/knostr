@@ -74,6 +74,87 @@ private class FeedMediaEventPublisherImpl(
     )
 }
 
+private class DirectMediaEventPublisherImpl(
+    private val nostr: Nostr,
+) : MediaEventPublisher {
+    override suspend fun post(
+        content: String,
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): Response<NostrEvent> {
+        return publish(
+            content = content,
+            tags = contentTags(tags, contentWarning, expiry, sensitive),
+            signerRequiredMessage = "Signer is required to post",
+        )
+    }
+
+    override suspend fun reply(
+        content: String,
+        replyToEventId: String,
+        rootEventId: String?,
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): Response<NostrEvent> {
+        val effectiveRootId = rootEventId ?: replyToEventId
+        val replyTags = buildList {
+            add(listOf("e", effectiveRootId, "", "root"))
+            if (effectiveRootId != replyToEventId) {
+                add(listOf("e", replyToEventId, "", "reply"))
+            }
+            addAll(contentTags(tags, contentWarning, expiry, sensitive))
+        }
+        return publish(
+            content = content,
+            tags = replyTags,
+            signerRequiredMessage = "Signer is required to reply",
+        )
+    }
+
+    private suspend fun publish(
+        content: String,
+        tags: List<List<String>>,
+        signerRequiredMessage: String,
+    ): Response<NostrEvent> {
+        val signer = nostr.signer()
+            ?: throw NostrException(signerRequiredMessage)
+        val unsigned = UnsignedEvent(
+            pubkey = signer.getPublicKey(),
+            createdAt = Clock.System.now().epochSeconds,
+            kind = EventKind.TEXT_NOTE,
+            tags = tags,
+            content = content,
+        )
+        val signed = signer.sign(unsigned)
+        nostr.events().publishEvent(signed)
+        return Response(signed)
+    }
+
+    private fun contentTags(
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): List<List<String>> {
+        return buildList {
+            addAll(tags)
+            if (contentWarning != null) {
+                add(listOf("content-warning", contentWarning))
+            }
+            if (expiry != null) {
+                add(listOf("expiration", expiry.toString()))
+            }
+            if (sensitive && contentWarning == null) {
+                add(listOf("content-warning"))
+            }
+        }
+    }
+}
+
 class MediaResourceImpl private constructor(
     private val nostr: Nostr,
     private val config: NostrSocialConfig,
@@ -91,7 +172,7 @@ class MediaResourceImpl private constructor(
 
     private val eventPublisher: MediaEventPublisher by lazy {
         injectedEventPublisher
-            ?: FeedMediaEventPublisherImpl(FeedResourceImpl(nostr, config))
+            ?: DirectMediaEventPublisherImpl(nostr)
     }
 
     private val json = Json {
