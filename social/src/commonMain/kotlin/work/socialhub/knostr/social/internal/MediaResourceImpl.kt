@@ -515,19 +515,26 @@ class MediaResourceImpl private constructor(
         private fun hasLeadingUrlBoundary(content: String, startIndex: Int): Boolean {
             if (startIndex == 0) return true
             val preceding = content[startIndex - 1]
-            return preceding.isWhitespace() || preceding in "([<{\"'"
+            return preceding in "([<{\"'" || !preceding.isUrlContinuation()
         }
 
         private fun hasTrailingUrlBoundary(content: String, endIndex: Int): Boolean {
             if (endIndex == content.length) return true
             val following = content[endIndex]
-            if (following.isWhitespace() || following in ")]}>\"'") return true
-            if (following !in ".,;:!?") return false
+            if (!following.isUrlContinuation()) return true
+            if (!following.isPunctuation()) return false
 
             val afterPunctuation = content.getOrNull(endIndex + 1)
             return afterPunctuation == null ||
-                afterPunctuation.isWhitespace() ||
-                afterPunctuation in ")]}>\"'"
+                !afterPunctuation.isUrlContinuation()
+        }
+
+        private fun Char.isUrlContinuation(): Boolean {
+            return isLetterOrDigit() || this in "-._~:/?#[]@!$&'()*+,;=%"
+        }
+
+        private fun Char.isPunctuation(): Boolean {
+            return this in "-._~:/?#[]@!$&'()*+,;=%"
         }
 
         internal fun configuredServerUrl(config: NostrSocialConfig): String {
