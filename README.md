@@ -252,21 +252,59 @@ val payInfo = social.zaps().getLnurlPayInfo("user@getalby.com").data
 ### Media Upload (Social)
 
 ```kotlin
-val social = NostrSocialFactory.instance(nostr)
+// Account-specific setting. nostr.build is used by default.
+val socialConfig = NostrSocialConfig().apply {
+    mediaUploadServerUrl = "https://nostr.build"
+}
+val social = NostrSocialFactory.instance(nostr, socialConfig)
 
-// Get NIP-96 server upload endpoint
-val uploadUrl = social.media().getServerInfo("https://nostr.build").data
-
-// Upload a file
-val media = social.media().upload(
-    serverUrl = "https://nostr.build",
+// Upload a file to the configured NIP-96 server.
+val media = social.media().uploadToConfiguredServer(
     fileData = imageBytes,
     fileName = "photo.jpg",
     mimeType = "image/jpeg",
     description = "A photo",
 ).data
 println("Uploaded: ${media.url}")
+
+// Upload and publish a kind:1 note with an NIP-92 imeta tag.
+val post = social.media().uploadAndPost(
+    fileData = imageBytes,
+    fileName = "photo.jpg",
+    mimeType = "image/jpeg",
+    content = "A photo from today",
+    description = "A sunset over the sea",
+).data
+println("Posted: ${post.event.id}")
+
+// Upload multiple images, then publish exactly one note.
+val uploads = listOf(
+    NostrMediaUpload(firstBytes, "first.jpg", "image/jpeg", "First image"),
+    NostrMediaUpload(secondBytes, "second.jpg", "image/jpeg", "Second image"),
+)
+val gallery = social.media().uploadManyAndPost(
+    uploads = uploads,
+    content = "Today's gallery",
+).data
+
+// The same upload flow can publish one NIP-10 reply.
+val reply = social.media().uploadAndReply(
+    uploads = uploads,
+    replyToEventId = "parent-event-id",
+    rootEventId = "root-event-id", // optional
+    content = "Photos in reply",
+).data
+
+// Build an imeta tag when composing an event manually.
+val imeta = NostrMediaTags.imeta(media)
+
+// A settings screen can change the server for this account at runtime.
+social.config().mediaUploadServerUrl = "https://your-nip96-server.example"
 ```
+
+All files are uploaded before an event is published. If any upload fails, no
+event is published. If relay publication fails afterward, files already stored
+on the media server are not deleted automatically.
 
 ### Direct Messages (Social)
 
@@ -321,7 +359,7 @@ val result = nostr.nip().resolveNip05("user@example.com")
 | `reactions()` | `like`, `unlike`, `react`, `unreact`, `getReactions`, `getUserReactions` | Reactions & likes |
 | `search()` | `searchNotes`, `searchUsers` | Content search (NIP-50) |
 | `zaps()` | `createZapRequest`, `getZapsForEvent`, `getZapsForUser`, `getLnurlPayInfo` | Lightning Zaps (NIP-57) |
-| `media()` | `upload`, `getServerInfo` | File upload (NIP-96) |
+| `media()` | `upload`, `uploadToConfiguredServer`, `uploadAndPost`, `uploadManyAndPost`, `uploadAndReply`, `getServerInfo` | File upload, image posts, and image replies (NIP-96 / NIP-92) |
 | `mutes()` | `mute`, `unmute`, `getMuteList` | User muting (NIP-51) |
 | `messages()` | `sendMessage`, `getMessages`, `getConversation`, `sendLegacyMessage`, `getLegacyMessages` | Direct messages (NIP-17 / NIP-04) |
 | `enrichment()` | `request`, `cancelPending`, `close` | Deferred social data enrichment |

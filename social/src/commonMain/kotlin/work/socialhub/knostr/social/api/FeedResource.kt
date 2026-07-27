@@ -5,6 +5,7 @@ import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.social.model.NostrNote
 import work.socialhub.knostr.social.model.NostrThread
 import kotlin.js.JsExport
+import kotlin.js.JsName
 
 @JsExport
 interface FeedResource {
@@ -34,6 +35,23 @@ interface FeedResource {
     ): Response<NostrEvent>
 
     /** Reply to a note (NIP-10 threading) */
+    @JsName("replyWithTags")
+    suspend fun reply(
+        content: String,
+        tags: List<List<String>> = listOf(),
+        replyToEventId: String,
+        rootEventId: String? = null,
+        contentWarning: String? = null,
+        expiry: Long? = null,
+        sensitive: Boolean = false,
+    ): Response<NostrEvent>
+
+    @Deprecated(
+        message = "Use the overload that accepts tags",
+        replaceWith = ReplaceWith(
+            "reply(content, emptyList(), replyToEventId, rootEventId, contentWarning, expiry, sensitive)",
+        ),
+    )
     suspend fun reply(
         content: String,
         replyToEventId: String,
@@ -91,6 +109,23 @@ interface FeedResource {
         sensitive: Boolean = false,
     ): Response<NostrEvent>
 
+    @JsExport.Ignore
+    fun replyBlocking(
+        content: String,
+        tags: List<List<String>> = listOf(),
+        replyToEventId: String,
+        rootEventId: String? = null,
+        contentWarning: String? = null,
+        expiry: Long? = null,
+        sensitive: Boolean = false,
+    ): Response<NostrEvent>
+
+    @Deprecated(
+        message = "Use the overload that accepts tags",
+        replaceWith = ReplaceWith(
+            "replyBlocking(content, emptyList(), replyToEventId, rootEventId, contentWarning, expiry, sensitive)",
+        ),
+    )
     @JsExport.Ignore
     fun replyBlocking(
         content: String,

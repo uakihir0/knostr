@@ -148,6 +148,7 @@ object SocialMapper {
                             when (key) {
                                 "m" -> media.mimeType = value
                                 "x" -> media.sha256 = value
+                                "size" -> media.sizeBytes = value.toLongOrNull()
                                 "dim" -> {
                                     val dims = value.split("x")
                                     if (dims.size == 2) {

@@ -6,6 +6,13 @@ import kotlin.js.JsExport
 @JsExport
 class NostrSocialConfig {
 
+    /**
+     * NIP-96 media server used by upload methods that do not specify a server.
+     *
+     * This setting belongs to the social/account instance and may be changed at runtime.
+     */
+    var mediaUploadServerUrl: String = DEFAULT_MEDIA_UPLOAD_SERVER_URL
+
     /** フォローリスト (kind:3) のキャッシュを有効にする */
     var cacheFollowList: Boolean = true
 
@@ -38,4 +45,9 @@ class NostrSocialConfig {
 
     /** Multiplier applied to the delay after each failed attempt. */
     var deferredEnrichmentBackoffMultiplier: Double = 2.0
+
+    companion object {
+        /** Widely used public NIP-96 media server. */
+        const val DEFAULT_MEDIA_UPLOAD_SERVER_URL: String = "https://nostr.build"
+    }
 }

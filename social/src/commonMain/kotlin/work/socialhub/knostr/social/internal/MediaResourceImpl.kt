@@ -12,16 +12,168 @@ import work.socialhub.knostr.entity.NostrEvent
 import work.socialhub.knostr.entity.NostrFilter
 import work.socialhub.knostr.entity.UnsignedEvent
 import work.socialhub.knostr.internal.InternalUtility
+import work.socialhub.knostr.social.NostrMediaTags
+import work.socialhub.knostr.social.NostrSocialConfig
+import work.socialhub.knostr.social.api.FeedResource
 import work.socialhub.knostr.social.api.MediaResource
 import work.socialhub.knostr.social.model.NostrFileMetadata
 import work.socialhub.knostr.social.model.NostrMedia
+import work.socialhub.knostr.social.model.NostrMediaPost
+import work.socialhub.knostr.social.model.NostrMediaUpload
 import work.socialhub.knostr.util.toBlocking
 import work.socialhub.khttpclient.HttpRequest
 import kotlin.time.Clock
 
-class MediaResourceImpl(
+internal interface MediaEventPublisher {
+    suspend fun post(
+        content: String,
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): Response<NostrEvent>
+
+    suspend fun reply(
+        content: String,
+        replyToEventId: String,
+        rootEventId: String?,
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): Response<NostrEvent>
+}
+
+private class FeedMediaEventPublisherImpl(
+    private val feed: FeedResource,
+) : MediaEventPublisher {
+    override suspend fun post(
+        content: String,
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ) = feed.post(content, tags, contentWarning, expiry, sensitive)
+
+    override suspend fun reply(
+        content: String,
+        replyToEventId: String,
+        rootEventId: String?,
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ) = feed.reply(
+        content = content,
+        tags = tags,
+        replyToEventId = replyToEventId,
+        rootEventId = rootEventId,
+        contentWarning = contentWarning,
+        expiry = expiry,
+        sensitive = sensitive,
+    )
+}
+
+private class DirectMediaEventPublisherImpl(
     private val nostr: Nostr,
+) : MediaEventPublisher {
+    override suspend fun post(
+        content: String,
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): Response<NostrEvent> {
+        return publish(
+            content = content,
+            tags = contentTags(tags, contentWarning, expiry, sensitive),
+            signerRequiredMessage = "Signer is required to post",
+        )
+    }
+
+    override suspend fun reply(
+        content: String,
+        replyToEventId: String,
+        rootEventId: String?,
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): Response<NostrEvent> {
+        val effectiveRootId = rootEventId ?: replyToEventId
+        val replyTags = buildList {
+            add(listOf("e", effectiveRootId, "", "root"))
+            if (effectiveRootId != replyToEventId) {
+                add(listOf("e", replyToEventId, "", "reply"))
+            }
+            addAll(contentTags(tags, contentWarning, expiry, sensitive))
+        }
+        return publish(
+            content = content,
+            tags = replyTags,
+            signerRequiredMessage = "Signer is required to reply",
+        )
+    }
+
+    private suspend fun publish(
+        content: String,
+        tags: List<List<String>>,
+        signerRequiredMessage: String,
+    ): Response<NostrEvent> {
+        val signer = nostr.signer()
+            ?: throw NostrException(signerRequiredMessage)
+        val unsigned = UnsignedEvent(
+            pubkey = signer.getPublicKey(),
+            createdAt = Clock.System.now().epochSeconds,
+            kind = EventKind.TEXT_NOTE,
+            tags = tags,
+            content = content,
+        )
+        val signed = signer.sign(unsigned)
+        nostr.events().publishEvent(signed)
+        return Response(signed)
+    }
+
+    private fun contentTags(
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): List<List<String>> {
+        return buildList {
+            addAll(tags)
+            if (contentWarning != null) {
+                add(listOf("content-warning", contentWarning))
+            }
+            if (expiry != null) {
+                add(listOf("expiration", expiry.toString()))
+            }
+            if (sensitive && contentWarning == null) {
+                add(listOf("content-warning"))
+            }
+        }
+    }
+}
+
+class MediaResourceImpl private constructor(
+    private val nostr: Nostr,
+    private val config: NostrSocialConfig,
+    private val injectedEventPublisher: MediaEventPublisher?,
+    private val configuredUploader: (suspend (NostrMediaUpload) -> Response<NostrMedia>)?,
 ) : MediaResource {
+
+    @Deprecated("Use NostrSocialFactory.instance(nostr).media()")
+    constructor(nostr: Nostr) : this(
+        nostr = nostr,
+        config = NostrSocialConfig(),
+        injectedEventPublisher = null,
+        configuredUploader = null,
+    )
+
+    private val eventPublisher: MediaEventPublisher by lazy {
+        injectedEventPublisher
+            ?: DirectMediaEventPublisherImpl(nostr)
+    }
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -45,6 +197,15 @@ class MediaResourceImpl(
             ?: throw NostrException("NIP-96 server info missing api_url")
 
         return Response(apiUrl)
+    }
+
+    override suspend fun uploadToConfiguredServer(
+        fileData: ByteArray,
+        fileName: String,
+        mimeType: String,
+        description: String,
+    ): Response<NostrMedia> {
+        return upload(configuredServerUrl(), fileData, fileName, mimeType, description)
     }
 
     override suspend fun upload(
@@ -95,31 +256,16 @@ class MediaResourceImpl(
         val media = NostrMedia()
         media.fileName = fileName
         media.mimeType = mimeType
+        media.alt = description.ifEmpty { null }
 
         if (nip94Event != null) {
-            val tags = nip94Event["tags"]?.jsonArray
-            if (tags != null) {
-                for (tagElement in tags) {
-                    val tag = tagElement.jsonArray
-                    if (tag.size < 2) continue
-                    val key = tag[0].jsonPrimitive.content
-                    val value = tag[1].jsonPrimitive.content
-                    when (key) {
-                        "url" -> media.url = value
-                        "ox" -> media.sha256 = value
-                        "size" -> media.sizeBytes = value.toLongOrNull()
-                        "dim" -> {
-                            val parts = value.split("x")
-                            if (parts.size == 2) {
-                                media.width = parts[0].toIntOrNull()
-                                media.height = parts[1].toIntOrNull()
-                            }
-                        }
-                        "blurhash" -> media.blurhash = value
-                        "thumb" -> media.thumbnailUrl = value
-                        "m" -> media.mimeType = value
-                    }
-                }
+            nip94Event["tags"]?.jsonArray?.let { tags ->
+                applyNip94Tags(
+                    media,
+                    tags.map { tag ->
+                        tag.jsonArray.map { it.jsonPrimitive.content }
+                    },
+                )
             }
         }
 
@@ -127,8 +273,74 @@ class MediaResourceImpl(
         if (media.url.isEmpty()) {
             jsonObj["url"]?.jsonPrimitive?.content?.let { media.url = it }
         }
+        if (media.url.isEmpty()) {
+            throw NostrException("Media upload response missing URL")
+        }
 
         return Response(media)
+    }
+
+    override suspend fun uploadAndPost(
+        fileData: ByteArray,
+        fileName: String,
+        mimeType: String,
+        content: String,
+        description: String,
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): Response<NostrMediaPost> {
+        return uploadManyAndPost(
+            uploads = listOf(NostrMediaUpload(fileData, fileName, mimeType, description)),
+            content = content,
+            tags = tags,
+            contentWarning = contentWarning,
+            expiry = expiry,
+            sensitive = sensitive,
+        )
+    }
+
+    override suspend fun uploadManyAndPost(
+        uploads: List<NostrMediaUpload>,
+        content: String,
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): Response<NostrMediaPost> {
+        val medias = uploadAll(uploads)
+        val postResponse = eventPublisher.post(
+            content = appendMediaUrls(content, medias.map { it.url }),
+            tags = tags + medias.map { NostrMediaTags.imeta(it) },
+            contentWarning = contentWarning,
+            expiry = expiry,
+            sensitive = sensitive,
+        )
+        return mediaPostResponse(medias, postResponse)
+    }
+
+    override suspend fun uploadAndReply(
+        uploads: List<NostrMediaUpload>,
+        replyToEventId: String,
+        content: String,
+        rootEventId: String?,
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): Response<NostrMediaPost> {
+        val medias = uploadAll(uploads)
+        val replyResponse = eventPublisher.reply(
+            content = appendMediaUrls(content, medias.map { it.url }),
+            replyToEventId = replyToEventId,
+            rootEventId = rootEventId,
+            tags = tags + medias.map { NostrMediaTags.imeta(it) },
+            contentWarning = contentWarning,
+            expiry = expiry,
+            sensitive = sensitive,
+        )
+        return mediaPostResponse(medias, replyResponse)
     }
 
     override suspend fun publishFileMetadata(
@@ -212,6 +424,15 @@ class MediaResourceImpl(
         return signer.sign(unsigned)
     }
 
+    override fun uploadToConfiguredServerBlocking(
+        fileData: ByteArray,
+        fileName: String,
+        mimeType: String,
+        description: String,
+    ): Response<NostrMedia> {
+        return toBlocking { uploadToConfiguredServer(fileData, fileName, mimeType, description) }
+    }
+
     override fun uploadBlocking(
         serverUrl: String,
         fileData: ByteArray,
@@ -224,6 +445,69 @@ class MediaResourceImpl(
 
     override fun getServerInfoBlocking(serverUrl: String): Response<String> {
         return toBlocking { getServerInfo(serverUrl) }
+    }
+
+    override fun uploadAndPostBlocking(
+        fileData: ByteArray,
+        fileName: String,
+        mimeType: String,
+        content: String,
+        description: String,
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): Response<NostrMediaPost> {
+        return toBlocking {
+            uploadAndPost(
+                fileData,
+                fileName,
+                mimeType,
+                content,
+                description,
+                tags,
+                contentWarning,
+                expiry,
+                sensitive,
+            )
+        }
+    }
+
+    override fun uploadManyAndPostBlocking(
+        uploads: List<NostrMediaUpload>,
+        content: String,
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): Response<NostrMediaPost> {
+        return toBlocking {
+            uploadManyAndPost(uploads, content, tags, contentWarning, expiry, sensitive)
+        }
+    }
+
+    override fun uploadAndReplyBlocking(
+        uploads: List<NostrMediaUpload>,
+        replyToEventId: String,
+        content: String,
+        rootEventId: String?,
+        tags: List<List<String>>,
+        contentWarning: String?,
+        expiry: Long?,
+        sensitive: Boolean,
+    ): Response<NostrMediaPost> {
+        return toBlocking {
+            uploadAndReply(
+                uploads,
+                replyToEventId,
+                content,
+                rootEventId,
+                tags,
+                contentWarning,
+                expiry,
+                sensitive,
+            )
+        }
     }
 
     override fun publishFileMetadataBlocking(
@@ -246,6 +530,128 @@ class MediaResourceImpl(
     companion object {
         private val BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
+        internal fun create(
+            nostr: Nostr,
+            config: NostrSocialConfig,
+            feed: FeedResource,
+        ): MediaResourceImpl {
+            return MediaResourceImpl(
+                nostr,
+                config,
+                FeedMediaEventPublisherImpl(feed),
+                null,
+            )
+        }
+
+        internal fun withConfiguredUploader(
+            nostr: Nostr,
+            config: NostrSocialConfig,
+            feed: FeedResource,
+            uploader: suspend (NostrMediaUpload) -> Response<NostrMedia>,
+        ): MediaResourceImpl {
+            return MediaResourceImpl(
+                nostr,
+                config,
+                FeedMediaEventPublisherImpl(feed),
+                uploader,
+            )
+        }
+
+        internal fun withDependencies(
+            nostr: Nostr,
+            config: NostrSocialConfig,
+            eventPublisher: MediaEventPublisher,
+            uploader: suspend (NostrMediaUpload) -> Response<NostrMedia>,
+        ): MediaResourceImpl {
+            return MediaResourceImpl(nostr, config, eventPublisher, uploader)
+        }
+
+        internal fun appendMediaUrls(content: String, mediaUrls: List<String>): String {
+            var result = content
+            for (mediaUrl in mediaUrls.distinct()) {
+                if (!containsCompleteMediaUrl(result, mediaUrl)) {
+                    result = if (result.isBlank()) mediaUrl else "$result\n$mediaUrl"
+                }
+            }
+            return result
+        }
+
+        private fun containsCompleteMediaUrl(content: String, mediaUrl: String): Boolean {
+            if (mediaUrl.isEmpty()) return true
+
+            var startIndex = content.indexOf(mediaUrl)
+            while (startIndex >= 0) {
+                val endIndex = startIndex + mediaUrl.length
+                if (
+                    hasLeadingUrlBoundary(content, startIndex) &&
+                    hasTrailingUrlBoundary(content, endIndex)
+                ) {
+                    return true
+                }
+                startIndex = content.indexOf(mediaUrl, startIndex + 1)
+            }
+            return false
+        }
+
+        private fun hasLeadingUrlBoundary(content: String, startIndex: Int): Boolean {
+            if (startIndex == 0) return true
+            val preceding = content[startIndex - 1]
+            return preceding in "([<{\"'" || !preceding.isUrlContinuation()
+        }
+
+        private fun hasTrailingUrlBoundary(content: String, endIndex: Int): Boolean {
+            if (endIndex == content.length) return true
+            val following = content[endIndex]
+            if (!following.isUrlContinuation()) return true
+            if (!following.isPunctuation()) return false
+
+            val afterPunctuation = content.getOrNull(endIndex + 1)
+            return afterPunctuation == null ||
+                !afterPunctuation.isUrlContinuation()
+        }
+
+        private fun Char.isUrlContinuation(): Boolean {
+            return isLetterOrDigit() || this in "-._~:/?#[]@!$&'()*+,;=%"
+        }
+
+        private fun Char.isPunctuation(): Boolean {
+            return this in "-._~:/?#[]@!$&'()*+,;=%"
+        }
+
+        internal fun configuredServerUrl(config: NostrSocialConfig): String {
+            return config.mediaUploadServerUrl.trim().trimEnd('/').also {
+                if (it.isEmpty()) {
+                    throw NostrException("Media upload server URL must not be blank")
+                }
+            }
+        }
+
+        internal fun applyNip94Tags(
+            media: NostrMedia,
+            tags: List<List<String>>,
+        ) {
+            for (tag in tags) {
+                if (tag.size < 2) continue
+                val value = tag[1]
+                when (tag[0]) {
+                    "url" -> media.url = value
+                    "x" -> media.sha256 = value
+                    "size" -> media.sizeBytes = value.toLongOrNull()
+                    "dim" -> {
+                        val parts = value.split("x")
+                        if (parts.size == 2) {
+                            media.width = parts[0].toIntOrNull()
+                            media.height = parts[1].toIntOrNull()
+                        }
+                    }
+                    "blurhash" -> media.blurhash = value
+                    "thumb" -> media.thumbnailUrl = value
+                    "m" -> media.mimeType = value
+                    "alt" -> if (media.alt.isNullOrBlank()) media.alt = value
+                }
+            }
+        }
+
         fun encodeBase64(data: ByteArray): String {
             val sb = StringBuilder()
             var i = 0
@@ -264,4 +670,43 @@ class MediaResourceImpl(
             return sb.toString()
         }
     }
+
+    private suspend fun uploadAll(uploads: List<NostrMediaUpload>): List<NostrMedia> {
+        if (uploads.isEmpty()) {
+            throw NostrException("At least one media upload is required")
+        }
+        return uploads.map { input ->
+            val response = configuredUploader?.invoke(input)
+                ?: uploadToConfiguredServer(
+                    input.fileData,
+                    input.fileName,
+                    input.mimeType,
+                    input.description,
+                )
+            response.data.apply {
+                if (url.isBlank()) {
+                    throw NostrException("Media upload response missing URL")
+                }
+                if (fileName == null) fileName = input.fileName
+                if (mimeType == null) mimeType = input.mimeType
+                if (alt.isNullOrBlank() && input.description.isNotBlank()) {
+                    alt = input.description
+                }
+            }
+        }
+    }
+
+    private fun mediaPostResponse(
+        medias: List<NostrMedia>,
+        eventResponse: Response<NostrEvent>,
+    ): Response<NostrMediaPost> {
+        val result = NostrMediaPost(medias.first(), eventResponse.data)
+        result.replaceMedias(medias)
+        return Response(result).also {
+            it.json = eventResponse.json
+            it.isComplete = eventResponse.isComplete
+        }
+    }
+
+    private fun configuredServerUrl(): String = configuredServerUrl(config)
 }

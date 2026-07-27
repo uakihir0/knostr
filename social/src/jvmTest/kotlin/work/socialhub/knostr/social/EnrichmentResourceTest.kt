@@ -117,7 +117,7 @@ class EnrichmentResourceTest {
             queries++
             Response(listOf())
         }
-        val cachedUser = work.socialhub.knostr.social.internal.SocialMapper.toUser(metadata(pubkey, "cached"))
+        val cachedUser = SocialMapper.toUser(metadata(pubkey, "cached"))
         val cache = RecordingCache(SocialDataBatch(users = listOf(cachedUser)))
         val enrichment = EnrichmentResourceImpl(fakeNostr(eventResource), cache, config())
         val update = CompletableDeferred<SocialDataBatch>()
@@ -583,6 +583,7 @@ class EnrichmentResourceTest {
     fun targetCanBeRequestedAgainAfterAttemptsAreExhausted() = runBlocking {
         var metadataQueries = 0
         val firstAttempt = CompletableDeferred<Unit>()
+        val secondAttemptStarted = CompletableDeferred<Unit>()
         val eventResource = fakeEvents { filter ->
             if (filter.kinds == listOf(EventKind.METADATA)) {
                 metadataQueries++
@@ -590,6 +591,7 @@ class EnrichmentResourceTest {
                     firstAttempt.complete(Unit)
                     Response(listOf())
                 } else {
+                    secondAttemptStarted.complete(Unit)
                     Response(listOf(metadata(pubkey, "second-cycle")))
                 }
             } else {
@@ -609,8 +611,15 @@ class EnrichmentResourceTest {
 
         enrichment.request(SocialDataRequest(userPubkeys = listOf(pubkey)), forceRefresh = true)
         withTimeout(2_000) { firstAttempt.await() }
-        delay(50)
-        enrichment.request(SocialDataRequest(userPubkeys = listOf(pubkey)), forceRefresh = true)
+        withTimeout(2_000) {
+            while (!secondAttemptStarted.isCompleted) {
+                enrichment.request(
+                    SocialDataRequest(userPubkeys = listOf(pubkey)),
+                    forceRefresh = true,
+                )
+                yield()
+            }
+        }
         val batch = withTimeout(2_000) { update.await() }
 
         assertEquals("second-cycle", batch.users.single().name)

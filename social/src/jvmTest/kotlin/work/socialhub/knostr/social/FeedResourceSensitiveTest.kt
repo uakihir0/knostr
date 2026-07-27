@@ -67,6 +67,7 @@ class FeedResourceSensitiveTest : AbstractTest() {
 
             val replyResponse = social.feed().reply(
                 content = "knostr test reply with sensitive flag",
+                tags = emptyList(),
                 replyToEventId = parentEvent.id,
                 sensitive = true,
             )

@@ -70,6 +70,7 @@ class FeedResourceExpiryTest : AbstractTest() {
             val futureTime = System.currentTimeMillis() / 1000 + 7200L
             val replyResponse = social.feed().reply(
                 content = "knostr test reply with expiry",
+                tags = emptyList(),
                 replyToEventId = parentEvent.id,
                 expiry = futureTime,
             )
