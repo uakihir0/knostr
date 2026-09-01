@@ -92,7 +92,9 @@ val social = NostrSocialFactory.instance(nostr)
 // Post a text note
 social.feed().post("Hello Nostr!")
 
-// Reply to a note
+// Reply to a note. The parent event is resolved (cache first) to fill in the
+// NIP-10 root/reply markers and the "p" tags of every thread participant.
+// Pass rootEventId when the thread root is already known to skip that lookup.
 social.feed().reply(
     content = "This is a reply",
     replyToEventId = "target-event-id",
