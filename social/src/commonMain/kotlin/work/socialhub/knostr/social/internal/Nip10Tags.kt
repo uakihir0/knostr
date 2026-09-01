@@ -9,10 +9,9 @@ import work.socialhub.knostr.entity.NostrEvent
  * and the direct parent carries "reply". A reply straight to a root note gets
  * the "root" marker alone, as the NIP requires.
  *
- * Relay hints stay empty because knostr does not record which relay an event
- * arrived from. The optional 5th element (the referenced author's pubkey) is
- * filled in whenever the parent event is known, so outbox-model clients can
- * locate the thread.
+ * The optional 5th element (the referenced author's pubkey) is filled in
+ * whenever the parent event is known, so outbox-model clients can locate the
+ * thread.
  */
 internal object Nip10Tags {
 
@@ -22,21 +21,23 @@ internal object Nip10Tags {
      * [parent] is the event being replied to; pass null when it could not be
      * resolved, in which case the parent is treated as the thread root and no
      * participants can be carried over. [rootEventId] overrides the root
-     * derived from [parent].
+     * derived from [parent], and [relayHint] is the relay to suggest for the
+     * referenced events ("" when there is nothing to suggest).
      */
     fun replyTags(
         replyToEventId: String,
         parent: NostrEvent?,
         rootEventId: String? = null,
+        relayHint: String = "",
     ): List<List<String>> {
         val rootId = rootEventId?.takeIf { it.isNotBlank() }
             ?: parent?.let { rootIdOf(it) }
             ?: replyToEventId
 
         val tags = mutableListOf<List<String>>()
-        tags.add(eventTag(rootId, "root", rootAuthorOf(parent, rootId, replyToEventId)))
+        tags.add(eventTag(rootId, "root", rootAuthorOf(parent, rootId, replyToEventId), relayHint))
         if (rootId != replyToEventId) {
-            tags.add(eventTag(replyToEventId, "reply", parent?.pubkey))
+            tags.add(eventTag(replyToEventId, "reply", parent?.pubkey, relayHint))
         }
         // NIP-10: the reply's "p" tags must contain all of the parent's "p" tags
         // plus the pubkey of the event being replied to, so every participant of
@@ -85,8 +86,8 @@ internal object Nip10Tags {
         eventId: String,
         marker: String,
         authorPubkey: String?,
+        relayHint: String,
     ): List<String> {
-        val relayHint = ""
         return if (authorPubkey.isNullOrBlank()) {
             listOf("e", eventId, relayHint, marker)
         } else {

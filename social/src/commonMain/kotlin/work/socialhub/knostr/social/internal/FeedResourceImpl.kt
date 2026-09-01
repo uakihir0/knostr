@@ -466,6 +466,15 @@ class FeedResourceImpl(
     }
 
     /**
+     * Relay hint for reference tags. knostr does not record which relay an event
+     * arrived from, so the first configured relay is offered as the best guess.
+     * An empty hint is valid when there is nothing to suggest.
+     */
+    private fun relayHint(): String {
+        return nostr.config().relayUrls.firstOrNull { it.isNotBlank() } ?: ""
+    }
+
+    /**
      * Best-effort lookup of an event used to build tags, cache first. Returns
      * null when the event cannot be found so publishing still succeeds with the
      * tags that are derivable without it.
@@ -541,7 +550,7 @@ class FeedResourceImpl(
         // Callers that already know the root can still pass it explicitly.
         val parent = resolveEventForTags(replyToEventId)
         val allTags = mutableListOf<List<String>>()
-        allTags.addAll(Nip10Tags.replyTags(replyToEventId, parent, rootEventId))
+        allTags.addAll(Nip10Tags.replyTags(replyToEventId, parent, rootEventId, relayHint()))
         allTags.addAll(tags)
         if (contentWarning != null) {
             allTags.add(listOf("content-warning", contentWarning))
@@ -605,11 +614,17 @@ class FeedResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to repost")
 
+        // NIP-18: the "e" tag carries a relay hint, and the repost should also
+        // tag the reposted author so the repost reaches their notifications.
+        val reposted = resolveEventForTags(eventId)
+        val tags = mutableListOf(listOf("e", eventId, relayHint()))
+        reposted?.pubkey?.takeIf { it.isNotBlank() }?.let { tags.add(listOf("p", it)) }
+
         val unsigned = UnsignedEvent(
             pubkey = signer.getPublicKey(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.REPOST,
-            tags = listOf(listOf("e", eventId)),
+            tags = tags,
             content = "",
         )
         val signed = signer.sign(unsigned)
@@ -632,8 +647,17 @@ class FeedResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to quote repost")
 
+        // NIP-18: ["q", <event-id>, <relay-url>, <pubkey>]. The author "p" tag is
+        // not part of the NIP but is what lets the quoted author see the quote.
+        val quoted = resolveEventForTags(eventId)
+        val quotedAuthor = quoted?.pubkey?.takeIf { it.isNotBlank() }
         val tags = mutableListOf<List<String>>()
-        tags.add(listOf("q", eventId))
+        if (quotedAuthor != null) {
+            tags.add(listOf("q", eventId, relayHint(), quotedAuthor))
+            tags.add(listOf("p", quotedAuthor))
+        } else {
+            tags.add(listOf("q", eventId, relayHint()))
+        }
         if (contentWarning != null) {
             tags.add(listOf("content-warning", contentWarning))
         }
