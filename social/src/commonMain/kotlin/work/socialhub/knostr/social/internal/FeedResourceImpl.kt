@@ -465,6 +465,27 @@ class FeedResourceImpl(
         }
     }
 
+    /**
+     * Best-effort lookup of an event used to build tags, cache first. Returns
+     * null when the event cannot be found so publishing still succeeds with the
+     * tags that are derivable without it.
+     */
+    private suspend fun resolveEventForTags(eventId: String): NostrEvent? {
+        cacheGet(SocialDataRequest(noteIds = listOf(eventId)))
+            .notes.firstOrNull { it.event.id == eventId }
+            ?.let { return it.event }
+
+        return try {
+            nostr.events()
+                .queryEvents(listOf(NostrFilter(ids = listOf(eventId), limit = 1)))
+                .data.firstOrNull { it.id == eventId }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private suspend fun cachePut(batch: SocialDataBatch) {
         if (batch.isEmpty()) return
         try {
@@ -515,13 +536,12 @@ class FeedResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to reply")
 
-        // NIP-10: build e-tags with root/reply markers
+        // NIP-10: the thread root and the participants both live on the parent
+        // event, so resolve it instead of assuming the parent is the root.
+        // Callers that already know the root can still pass it explicitly.
+        val parent = resolveEventForTags(replyToEventId)
         val allTags = mutableListOf<List<String>>()
-        val effectiveRootId = rootEventId ?: replyToEventId
-        allTags.add(listOf("e", effectiveRootId, "", "root"))
-        if (effectiveRootId != replyToEventId) {
-            allTags.add(listOf("e", replyToEventId, "", "reply"))
-        }
+        allTags.addAll(Nip10Tags.replyTags(replyToEventId, parent, rootEventId))
         allTags.addAll(tags)
         if (contentWarning != null) {
             allTags.add(listOf("content-warning", contentWarning))
