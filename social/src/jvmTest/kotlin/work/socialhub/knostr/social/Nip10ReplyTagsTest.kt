@@ -1,5 +1,6 @@
 package work.socialhub.knostr.social
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
@@ -17,6 +18,7 @@ import work.socialhub.knostr.social.internal.FeedResourceImpl
 import work.socialhub.knostr.social.internal.SocialMapper
 import work.socialhub.knostr.social.model.SocialDataBatch
 import work.socialhub.knostr.social.model.SocialDataRequest
+import kotlin.system.measureTimeMillis
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -205,6 +207,35 @@ class Nip10ReplyTagsTest {
         assertNull(tags.firstOrNull { it.firstOrNull() == "e" && it.size >= 4 && it[3] == "reply" })
     }
 
+    @Test
+    fun slowParentLookupDoesNotHoldUpPublishing() {
+        val lookupTimeoutMs = 100L
+        val relayDelayMs = 10_000L
+        val fixture = fixture(
+            parent = event(parentId, parentAuthor),
+            lookupDelayMs = relayDelayMs,
+            lookupTimeoutMs = lookupTimeoutMs,
+        )
+
+        val elapsed = measureTimeMillis {
+            val tags = runBlocking {
+                fixture.feed.reply(
+                    content = "reply",
+                    tags = listOf(),
+                    replyToEventId = parentId,
+                ).data.tags
+            }
+
+            // The parent never arrives, so the reply falls back to the tags it
+            // can derive on its own instead of waiting for the relay.
+            assertEquals(listOf(listOf("e", parentId, "", "root")), tags.eventTags())
+            assertTrue(tags.participants().isEmpty())
+        }
+
+        assertEquals(1, fixture.published.size)
+        assertTrue(elapsed < relayDelayMs, "the lookup should time out, but took ${elapsed}ms")
+    }
+
     private fun List<List<String>>.eventTags() = filter { it.firstOrNull() == "e" }
 
     private fun List<List<String>>.participants() =
@@ -227,6 +258,8 @@ class Nip10ReplyTagsTest {
     private fun fixture(
         parent: NostrEvent?,
         cachedParent: NostrEvent? = null,
+        lookupDelayMs: Long = 0,
+        lookupTimeoutMs: Long? = null,
     ): Fixture {
         val published = mutableListOf<NostrEvent>()
         val fixture = Fixture(published)
@@ -237,6 +270,7 @@ class Nip10ReplyTagsTest {
                 val ids = filters.flatMap { it.ids ?: listOf() }
                 if (ids.isEmpty()) return Response(listOf())
                 fixture.parentLookups++
+                if (lookupDelayMs > 0) delay(lookupDelayMs)
                 return Response(listOfNotNull(parent).filter { it.id in ids })
             }
 
@@ -270,7 +304,10 @@ class Nip10ReplyTagsTest {
             override suspend fun put(batch: SocialDataBatch) = Unit
             override suspend fun remove(request: SocialDataRequest) = Unit
         }
-        val config = NostrSocialConfig().apply { deferredEnrichmentEnabled = false }
+        val config = NostrSocialConfig().apply {
+            deferredEnrichmentEnabled = false
+            lookupTimeoutMs?.let { referencedEventLookupTimeoutMs = it }
+        }
         fixture.feed = FeedResourceImpl(nostr, config, cache)
         return fixture
     }

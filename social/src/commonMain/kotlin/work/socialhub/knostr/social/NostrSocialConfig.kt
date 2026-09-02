@@ -31,6 +31,13 @@ class NostrSocialConfig {
     /** ノート統計キャッシュの有効期限 (ミリ秒) */
     var noteStatsCacheTtlMs: Long = 60_000
 
+    /**
+     * リプライ/リポスト/引用のタグを組むために参照先イベントをリレーから
+     * 引くときのタイムアウト (ミリ秒)。取得できなくても投稿は続行するため、
+     * リレーのクエリタイムアウトより十分短く設定している。
+     */
+    var referencedEventLookupTimeoutMs: Long = 3_000
+
     /** Optional application-provided social cache. */
     var socialCache: SocialCache? = null
 

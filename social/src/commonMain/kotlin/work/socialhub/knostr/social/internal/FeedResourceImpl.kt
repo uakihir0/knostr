@@ -3,6 +3,7 @@ package work.socialhub.knostr.social.internal
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.NostrException
@@ -478,6 +479,10 @@ class FeedResourceImpl(
      * Best-effort lookup of an event used to build tags, cache first. Returns
      * null when the event cannot be found so publishing still succeeds with the
      * tags that are derivable without it.
+     *
+     * The relay lookup is bounded by [NostrSocialConfig.referencedEventLookupTimeoutMs]
+     * rather than the much longer relay query timeout: a relay that is slow or
+     * never sends EOSE must not hold up the event being published.
      */
     private suspend fun resolveEventForTags(eventId: String): NostrEvent? {
         cacheGet(SocialDataRequest(noteIds = listOf(eventId)))
@@ -485,9 +490,11 @@ class FeedResourceImpl(
             ?.let { return it.event }
 
         return try {
-            nostr.events()
-                .queryEvents(listOf(NostrFilter(ids = listOf(eventId), limit = 1)))
-                .data.firstOrNull { it.id == eventId }
+            withTimeoutOrNull(config.referencedEventLookupTimeoutMs) {
+                nostr.events()
+                    .queryEvents(listOf(NostrFilter(ids = listOf(eventId), limit = 1)))
+                    .data.firstOrNull { it.id == eventId }
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -546,8 +553,9 @@ class FeedResourceImpl(
             ?: throw NostrException("Signer is required to reply")
 
         // NIP-10: the thread root and the participants both live on the parent
-        // event, so resolve it instead of assuming the parent is the root.
-        // Callers that already know the root can still pass it explicitly.
+        // event, so resolve it instead of assuming the parent is the root. A
+        // caller-supplied rootEventId overrides the root marker but does not
+        // remove the need for the parent's participants and author.
         val parent = resolveEventForTags(replyToEventId)
         val allTags = mutableListOf<List<String>>()
         allTags.addAll(Nip10Tags.replyTags(replyToEventId, parent, rootEventId, relayHint()))
