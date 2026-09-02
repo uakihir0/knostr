@@ -92,9 +92,10 @@ val social = NostrSocialFactory.instance(nostr)
 social.feed().post("Hello Nostr!")
 
 // ノートにリプライ
-// 親イベントを解決 (キャッシュ優先) して NIP-10 の root/reply マーカーと
-// スレッド参加者の p タグを自動付与します。
-// スレッドの root が判っている場合は rootEventId を渡すと解決処理を省略できます。
+// 親イベントを解決 (キャッシュ優先、ミスした場合のみ時間制限付きでリレー問い合わせ)
+// して NIP-10 の root/reply マーカーとスレッド参加者の p タグを自動付与します。
+// rootEventId を渡すと root マーカーを上書きできますが、親の author と参加者が
+// 必要なため親イベントの解決自体は行われます。
 social.feed().reply(
     content = "これはリプライです",
     replyToEventId = "target-event-id",
