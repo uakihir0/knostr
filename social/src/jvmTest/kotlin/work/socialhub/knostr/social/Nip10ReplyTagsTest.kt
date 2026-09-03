@@ -80,6 +80,27 @@ class Nip10ReplyTagsTest {
     }
 
     @Test
+    fun theRootRelayHintRecordedByTheParentIsKept() = runBlocking {
+        val rootRelay = "wss://root.relay.example"
+        val parent = event(
+            parentId,
+            parentAuthor,
+            listOf(listOf("e", rootId, rootRelay, "root", rootAuthor)),
+        )
+        val fixture = fixture(parent)
+
+        val tags = fixture.feed.reply(
+            content = "reply",
+            tags = listOf(),
+            replyToEventId = parentId,
+        ).data.tags
+
+        // The parent knows where the root is stored; our own guess must not
+        // replace that hint.
+        assertEquals(listOf("e", rootId, rootRelay, "root", rootAuthor), tags.eventTags().first())
+    }
+
+    @Test
     fun parentAuthorIsNotDuplicatedWhenAlreadyMentioned() = runBlocking {
         val parent = event(
             parentId,
