@@ -1,7 +1,10 @@
 package work.socialhub.knostr.internal
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
@@ -31,8 +34,15 @@ class EventResourceImpl(
         }
     }
 
-    @OptIn(ExperimentalAtomicApi::class)
     override suspend fun queryEvents(filters: List<NostrFilter>): Response<List<NostrEvent>> {
+        return queryEventsWithTimeout(filters, config.queryTimeoutMs)
+    }
+
+    @OptIn(ExperimentalAtomicApi::class)
+    override suspend fun queryEventsWithTimeout(
+        filters: List<NostrFilter>,
+        timeoutMs: Long,
+    ): Response<List<NostrEvent>> {
         try {
             val eventChannel = Channel<NostrEvent>(Channel.UNLIMITED)
             val eoseDeferred = CompletableDeferred<Unit>()
@@ -54,12 +64,16 @@ class EventResourceImpl(
 
             val isComplete: Boolean
             try {
-                isComplete = withTimeoutOrNull(config.queryTimeoutMs) {
+                isComplete = withTimeoutOrNull(timeoutMs) {
                     eoseDeferred.await()
                     true
                 } ?: false
             } finally {
-                relayPool.unsubscribe(subId)
+                // The caller may be cancelled by now, and the CLOSE plus the
+                // bookkeeping must still run or the subscription leaks.
+                withContext(NonCancellable) {
+                    relayPool.unsubscribe(subId)
+                }
             }
 
             eventChannel.close()
@@ -70,6 +84,8 @@ class EventResourceImpl(
             return Response<List<NostrEvent>>(events).also {
                 it.isComplete = isComplete
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             throw NostrException(e)
         }
@@ -96,6 +112,13 @@ class EventResourceImpl(
 
     override fun queryEventsBlocking(filters: List<NostrFilter>): Response<List<NostrEvent>> {
         return toBlocking { queryEvents(filters) }
+    }
+
+    override fun queryEventsWithTimeoutBlocking(
+        filters: List<NostrFilter>,
+        timeoutMs: Long,
+    ): Response<List<NostrEvent>> {
+        return toBlocking { queryEventsWithTimeout(filters, timeoutMs) }
     }
 
     override fun deleteEventBlocking(eventId: String, reason: String): Response<Boolean> {

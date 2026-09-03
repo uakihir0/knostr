@@ -25,4 +25,23 @@ class EventResourceCompletenessTest {
 
         assertFalse(response.isComplete)
     }
+
+    @Test
+    fun boundedQueryWaitsForTheCallerTimeoutInsteadOfTheConfiguredOne() = runTest {
+        val config = NostrConfig().apply { queryTimeoutMs = 60_000 }
+        val resource = EventResourceImpl(config, RelayPool())
+
+        val response = resource.queryEventsWithTimeout(
+            filters = listOf(NostrFilter(kinds = listOf(EventKind.TEXT_NOTE))),
+            timeoutMs = 10,
+        )
+
+        // The events collected so far come back; only completeness is lost.
+        assertFalse(response.isComplete)
+        assertTrue(response.data.isEmpty())
+        assertTrue(
+            testScheduler.currentTime < config.queryTimeoutMs,
+            "the query should give up after 10ms, but waited ${testScheduler.currentTime}ms",
+        )
+    }
 }
