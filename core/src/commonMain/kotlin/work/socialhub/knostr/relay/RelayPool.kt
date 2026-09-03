@@ -120,7 +120,13 @@ class RelayPool {
         }
     }
 
-    /** Subscribe to events across all connected relays */
+    /**
+     * Subscribe to events across all connected relays.
+     *
+     * Nothing stays registered unless the id is returned: the caller has no way
+     * to unsubscribe from a subscription whose id it never learned, so a
+     * cancelled or failed setup rolls its own registration back.
+     */
     suspend fun subscribe(
         filters: List<NostrFilter>,
         onEvent: (NostrEvent) -> Unit,
@@ -128,12 +134,17 @@ class RelayPool {
     ): String {
         val subId = generateSubscriptionId()
         val subscription = Subscription(subId, filters, onEvent, onEose)
-        addSubscription(subscription)
         mutex.withLock {
-            for (connection in connections.values) {
-                if (connection.isOpen) {
-                    connection.sendReq(subId, filters)
+            addSubscription(subscription)
+            try {
+                for (connection in connections.values) {
+                    if (connection.isOpen) {
+                        connection.sendReq(subId, filters)
+                    }
                 }
+            } catch (e: Throwable) {
+                removeSubscription(subId)
+                throw e
             }
         }
         return subId
