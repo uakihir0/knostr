@@ -22,7 +22,8 @@ internal object Nip10Tags {
      * resolved, in which case the parent is treated as the thread root and no
      * participants can be carried over. [rootEventId] overrides the root
      * derived from [parent], and [relayHint] is the relay to suggest for the
-     * referenced events ("" when there is nothing to suggest).
+     * referenced events ("" when there is nothing to suggest) unless the parent
+     * already recorded a better one for the root.
      */
     fun replyTags(
         replyToEventId: String,
@@ -35,7 +36,8 @@ internal object Nip10Tags {
             ?: replyToEventId
 
         val tags = mutableListOf<List<String>>()
-        tags.add(eventTag(rootId, "root", rootAuthorOf(parent, rootId, replyToEventId), relayHint))
+        val rootRelay = rootRelayOf(parent, rootId) ?: relayHint
+        tags.add(eventTag(rootId, "root", rootAuthorOf(parent, rootId, replyToEventId), rootRelay))
         if (rootId != replyToEventId) {
             tags.add(eventTag(replyToEventId, "reply", parent?.pubkey, relayHint))
         }
@@ -59,6 +61,18 @@ internal object Nip10Tags {
         eventTags.firstOrNull { it.size >= 4 && it[3] == "reply" }?.let { return it[1] }
         // Legacy positional form: the first "e" tag is the root.
         return eventTags.firstOrNull { it.size < 4 || it[3].isBlank() }?.get(1)
+    }
+
+    /**
+     * Relay where the parent says it saw [rootId]. That hint is worth more than
+     * our own guess, because it is where the root is known to be stored. Null
+     * when the parent offers none.
+     */
+    private fun rootRelayOf(parent: NostrEvent?, rootId: String): String? {
+        if (parent == null) return null
+        return parent.tags
+            .firstOrNull { it.size >= 3 && it[0] == "e" && it[1] == rootId && it[2].isNotBlank() }
+            ?.get(2)
     }
 
     /** Author of [rootId], as far as the parent event reveals it. */
