@@ -465,6 +465,45 @@ class FeedResourceImpl(
         }
     }
 
+    /**
+     * Relay hint for reference tags. knostr does not record which relay an event
+     * arrived from, so the first configured relay is offered as the best guess.
+     * An empty hint is valid when there is nothing to suggest.
+     */
+    private fun relayHint(): String {
+        return nostr.config().relayUrls.firstOrNull { it.isNotBlank() } ?: ""
+    }
+
+    /**
+     * Best-effort lookup of an event used to build tags, cache first. Returns
+     * null when the event cannot be found so publishing still succeeds with the
+     * tags that are derivable without it.
+     *
+     * The relay lookup is bounded by [NostrSocialConfig.referencedEventLookupTimeoutMs]
+     * rather than the much longer relay query timeout: a relay that is slow or
+     * never sends EOSE must not hold up the event being published. The bound is
+     * passed to the query so an event that did arrive is still used even when
+     * EOSE never came.
+     */
+    private suspend fun resolveEventForTags(eventId: String): NostrEvent? {
+        cacheGet(SocialDataRequest(noteIds = listOf(eventId)))
+            .notes.firstOrNull { it.event.id == eventId }
+            ?.let { return it.event }
+
+        return try {
+            nostr.events()
+                .queryEventsWithTimeout(
+                    filters = listOf(NostrFilter(ids = listOf(eventId), limit = 1)),
+                    timeoutMs = config.referencedEventLookupTimeoutMs,
+                )
+                .data.firstOrNull { it.id == eventId }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private suspend fun cachePut(batch: SocialDataBatch) {
         if (batch.isEmpty()) return
         try {
@@ -515,13 +554,13 @@ class FeedResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to reply")
 
-        // NIP-10: build e-tags with root/reply markers
+        // NIP-10: the thread root and the participants both live on the parent
+        // event, so resolve it instead of assuming the parent is the root. A
+        // caller-supplied rootEventId overrides the root marker but does not
+        // remove the need for the parent's participants and author.
+        val parent = resolveEventForTags(replyToEventId)
         val allTags = mutableListOf<List<String>>()
-        val effectiveRootId = rootEventId ?: replyToEventId
-        allTags.add(listOf("e", effectiveRootId, "", "root"))
-        if (effectiveRootId != replyToEventId) {
-            allTags.add(listOf("e", replyToEventId, "", "reply"))
-        }
+        allTags.addAll(Nip10Tags.replyTags(replyToEventId, parent, rootEventId, relayHint()))
         allTags.addAll(tags)
         if (contentWarning != null) {
             allTags.add(listOf("content-warning", contentWarning))
@@ -585,11 +624,17 @@ class FeedResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to repost")
 
+        // NIP-18: the "e" tag carries a relay hint, and the repost should also
+        // tag the reposted author so the repost reaches their notifications.
+        val reposted = resolveEventForTags(eventId)
+        val tags = mutableListOf(listOf("e", eventId, relayHint()))
+        reposted?.pubkey?.takeIf { it.isNotBlank() }?.let { tags.add(listOf("p", it)) }
+
         val unsigned = UnsignedEvent(
             pubkey = signer.getPublicKey(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.REPOST,
-            tags = listOf(listOf("e", eventId)),
+            tags = tags,
             content = "",
         )
         val signed = signer.sign(unsigned)
@@ -612,8 +657,17 @@ class FeedResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to quote repost")
 
+        // NIP-18: ["q", <event-id>, <relay-url>, <pubkey>]. The author "p" tag is
+        // not part of the NIP but is what lets the quoted author see the quote.
+        val quoted = resolveEventForTags(eventId)
+        val quotedAuthor = quoted?.pubkey?.takeIf { it.isNotBlank() }
         val tags = mutableListOf<List<String>>()
-        tags.add(listOf("q", eventId))
+        if (quotedAuthor != null) {
+            tags.add(listOf("q", eventId, relayHint(), quotedAuthor))
+            tags.add(listOf("p", quotedAuthor))
+        } else {
+            tags.add(listOf("q", eventId, relayHint()))
+        }
         if (contentWarning != null) {
             tags.add(listOf("content-warning", contentWarning))
         }

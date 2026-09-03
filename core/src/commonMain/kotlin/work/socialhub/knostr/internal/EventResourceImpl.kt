@@ -1,7 +1,10 @@
 package work.socialhub.knostr.internal
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
@@ -31,8 +34,15 @@ class EventResourceImpl(
         }
     }
 
-    @OptIn(ExperimentalAtomicApi::class)
     override suspend fun queryEvents(filters: List<NostrFilter>): Response<List<NostrEvent>> {
+        return queryEventsWithTimeout(filters, config.queryTimeoutMs)
+    }
+
+    @OptIn(ExperimentalAtomicApi::class)
+    override suspend fun queryEventsWithTimeout(
+        filters: List<NostrFilter>,
+        timeoutMs: Long,
+    ): Response<List<NostrEvent>> {
         try {
             val eventChannel = Channel<NostrEvent>(Channel.UNLIMITED)
             val eoseDeferred = CompletableDeferred<Unit>()
@@ -54,12 +64,22 @@ class EventResourceImpl(
 
             val isComplete: Boolean
             try {
-                isComplete = withTimeoutOrNull(config.queryTimeoutMs) {
+                isComplete = withTimeoutOrNull(timeoutMs) {
                     eoseDeferred.await()
                     true
                 } ?: false
             } finally {
-                relayPool.unsubscribe(subId)
+                // The caller may be cancelled by now, and the subscription must
+                // still be dropped. RelayPool.unsubscribe removes the local
+                // bookkeeping before it talks to the relays, so bounding the
+                // wait here can at worst skip a CLOSE frame: it cannot leave
+                // callbacks behind, and a stalled relay cannot stretch the
+                // deadline the caller asked for.
+                withContext(NonCancellable) {
+                    withTimeoutOrNull(UNSUBSCRIBE_TIMEOUT_MS) {
+                        relayPool.unsubscribe(subId)
+                    }
+                }
             }
 
             eventChannel.close()
@@ -70,6 +90,8 @@ class EventResourceImpl(
             return Response<List<NostrEvent>>(events).also {
                 it.isComplete = isComplete
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             throw NostrException(e)
         }
@@ -98,7 +120,19 @@ class EventResourceImpl(
         return toBlocking { queryEvents(filters) }
     }
 
+    override fun queryEventsWithTimeoutBlocking(
+        filters: List<NostrFilter>,
+        timeoutMs: Long,
+    ): Response<List<NostrEvent>> {
+        return toBlocking { queryEventsWithTimeout(filters, timeoutMs) }
+    }
+
     override fun deleteEventBlocking(eventId: String, reason: String): Response<Boolean> {
         return toBlocking { deleteEvent(eventId, reason) }
+    }
+
+    private companion object {
+        /** How long a finished query waits for the CLOSE frames to go out. */
+        const val UNSUBSCRIBE_TIMEOUT_MS = 1_000L
     }
 }
