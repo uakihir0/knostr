@@ -18,9 +18,14 @@ interface EventResource {
 
     /**
      * Query events, waiting at most [timeoutMs] for EOSE instead of the
-     * configured query timeout. Events that already arrived are returned and
-     * [Response.isComplete] is false when the wait ran out first, so a slow
-     * relay only costs the caller the events it never sent.
+     * configured query timeout. [Response.isComplete] is false when the wait
+     * ran out first.
+     *
+     * An implementation that receives events one by one should override this to
+     * report the events it collected before the wait ran out, the way
+     * [work.socialhub.knostr.internal.EventResourceImpl] does. This fallback
+     * cannot see them: it cancels [queryEvents] and reports an empty incomplete
+     * response.
      */
     suspend fun queryEventsWithTimeout(
         filters: List<NostrFilter>,
