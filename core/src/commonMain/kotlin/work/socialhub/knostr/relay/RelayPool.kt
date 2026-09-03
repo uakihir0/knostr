@@ -128,9 +128,8 @@ class RelayPool {
     ): String {
         val subId = generateSubscriptionId()
         val subscription = Subscription(subId, filters, onEvent, onEose)
+        addSubscription(subscription)
         mutex.withLock {
-            subscriptions.store(subscriptions.load() + (subId to subscription))
-
             for (connection in connections.values) {
                 if (connection.isOpen) {
                     connection.sendReq(subId, filters)
@@ -140,10 +139,16 @@ class RelayPool {
         return subId
     }
 
-    /** Unsubscribe from a subscription */
+    /**
+     * Unsubscribe from a subscription.
+     *
+     * The local bookkeeping is dropped before the relays are told, because it
+     * needs no relay round trip: a contended mutex or a stalled CLOSE can then
+     * no longer keep the callbacks alive.
+     */
     suspend fun unsubscribe(subscriptionId: String) {
+        removeSubscription(subscriptionId)
         mutex.withLock {
-            subscriptions.store(subscriptions.load() - subscriptionId)
             for (connection in connections.values) {
                 if (connection.isOpen) {
                     connection.sendClose(subscriptionId)
@@ -152,12 +157,35 @@ class RelayPool {
         }
     }
 
+    /** Ids of the subscriptions the pool currently tracks. */
+    internal fun activeSubscriptionIds(): Set<String> {
+        return subscriptions.load().keys
+    }
+
     /** Clear seen event IDs cache */
     fun clearSeenEvents() {
         subscriptions.load().values.forEach { it.clearSeenEvents() }
     }
 
     private var poolScope: CoroutineScope? = null
+
+    // The subscription map is swapped with compare-and-set so that adding and
+    // removing never lose each other's update, even outside the mutex.
+    private fun addSubscription(subscription: Subscription) {
+        while (true) {
+            val current = subscriptions.load()
+            val updated = current + (subscription.id to subscription)
+            if (subscriptions.compareAndSet(current, updated)) return
+        }
+    }
+
+    private fun removeSubscription(subscriptionId: String) {
+        while (true) {
+            val current = subscriptions.load()
+            if (subscriptionId !in current) return
+            if (subscriptions.compareAndSet(current, current - subscriptionId)) return
+        }
+    }
 
     private fun handleAuth(relayUrl: String, challenge: String, connection: RelayConnection) {
         onAuthCallback?.invoke(relayUrl, challenge)

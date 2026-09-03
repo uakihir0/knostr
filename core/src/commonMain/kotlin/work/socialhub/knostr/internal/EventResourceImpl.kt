@@ -69,10 +69,16 @@ class EventResourceImpl(
                     true
                 } ?: false
             } finally {
-                // The caller may be cancelled by now, and the CLOSE plus the
-                // bookkeeping must still run or the subscription leaks.
+                // The caller may be cancelled by now, and the subscription must
+                // still be dropped. RelayPool.unsubscribe removes the local
+                // bookkeeping before it talks to the relays, so bounding the
+                // wait here can at worst skip a CLOSE frame: it cannot leave
+                // callbacks behind, and a stalled relay cannot stretch the
+                // deadline the caller asked for.
                 withContext(NonCancellable) {
-                    relayPool.unsubscribe(subId)
+                    withTimeoutOrNull(UNSUBSCRIBE_TIMEOUT_MS) {
+                        relayPool.unsubscribe(subId)
+                    }
                 }
             }
 
@@ -123,5 +129,10 @@ class EventResourceImpl(
 
     override fun deleteEventBlocking(eventId: String, reason: String): Response<Boolean> {
         return toBlocking { deleteEvent(eventId, reason) }
+    }
+
+    private companion object {
+        /** How long a finished query waits for the CLOSE frames to go out. */
+        const val UNSUBSCRIBE_TIMEOUT_MS = 1_000L
     }
 }
