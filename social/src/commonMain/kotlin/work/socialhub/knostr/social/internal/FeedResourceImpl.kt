@@ -3,7 +3,6 @@ package work.socialhub.knostr.social.internal
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withTimeoutOrNull
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.NostrException
@@ -482,7 +481,9 @@ class FeedResourceImpl(
      *
      * The relay lookup is bounded by [NostrSocialConfig.referencedEventLookupTimeoutMs]
      * rather than the much longer relay query timeout: a relay that is slow or
-     * never sends EOSE must not hold up the event being published.
+     * never sends EOSE must not hold up the event being published. The bound is
+     * passed to the query so an event that did arrive is still used even when
+     * EOSE never came.
      */
     private suspend fun resolveEventForTags(eventId: String): NostrEvent? {
         cacheGet(SocialDataRequest(noteIds = listOf(eventId)))
@@ -490,11 +491,12 @@ class FeedResourceImpl(
             ?.let { return it.event }
 
         return try {
-            withTimeoutOrNull(config.referencedEventLookupTimeoutMs) {
-                nostr.events()
-                    .queryEvents(listOf(NostrFilter(ids = listOf(eventId), limit = 1)))
-                    .data.firstOrNull { it.id == eventId }
-            }
+            nostr.events()
+                .queryEventsWithTimeout(
+                    filters = listOf(NostrFilter(ids = listOf(eventId), limit = 1)),
+                    timeoutMs = config.referencedEventLookupTimeoutMs,
+                )
+                .data.firstOrNull { it.id == eventId }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
