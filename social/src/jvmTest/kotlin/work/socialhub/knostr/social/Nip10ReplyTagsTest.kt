@@ -233,7 +233,31 @@ class Nip10ReplyTagsTest {
         }
 
         assertEquals(1, fixture.published.size)
-        assertTrue(elapsed < relayDelayMs, "the lookup should time out, but took ${elapsed}ms")
+        assertEquals(1, fixture.parentLookups)
+        assertTrue(
+            elapsed < lookupTimeoutMs + TIMEOUT_TOLERANCE_MS,
+            "the lookup should time out near ${lookupTimeoutMs}ms, but took ${elapsed}ms",
+        )
+    }
+
+    @Test
+    fun aParentThatArrivesBeforeEoseStillTagsTheThread() = runBlocking {
+        // A relay that never sends EOSE makes the query time out, but the
+        // parent it did send is reported as an incomplete response and must
+        // still be used for the tags.
+        val fixture = fixture(
+            parent = event(parentId, parentAuthor),
+            lookupIsComplete = false,
+        )
+
+        val tags = fixture.feed.reply(
+            content = "reply",
+            tags = listOf(),
+            replyToEventId = parentId,
+        ).data.tags
+
+        assertEquals(listOf(listOf("e", parentId, "", "root", parentAuthor)), tags.eventTags())
+        assertEquals(listOf(parentAuthor), tags.participants())
     }
 
     private fun List<List<String>>.eventTags() = filter { it.firstOrNull() == "e" }
@@ -260,6 +284,7 @@ class Nip10ReplyTagsTest {
         cachedParent: NostrEvent? = null,
         lookupDelayMs: Long = 0,
         lookupTimeoutMs: Long? = null,
+        lookupIsComplete: Boolean = true,
     ): Fixture {
         val published = mutableListOf<NostrEvent>()
         val fixture = Fixture(published)
@@ -272,6 +297,7 @@ class Nip10ReplyTagsTest {
                 fixture.parentLookups++
                 if (lookupDelayMs > 0) delay(lookupDelayMs)
                 return Response(listOfNotNull(parent).filter { it.id in ids })
+                    .also { it.isComplete = lookupIsComplete }
             }
 
             override suspend fun publishEvent(event: NostrEvent): Response<Boolean> {
@@ -315,5 +341,10 @@ class Nip10ReplyTagsTest {
     private class Fixture(val published: MutableList<NostrEvent>) {
         lateinit var feed: FeedResourceImpl
         var parentLookups = 0
+    }
+
+    private companion object {
+        /** Slack for scheduling around the configured lookup timeout. */
+        const val TIMEOUT_TOLERANCE_MS = 1_000L
     }
 }
