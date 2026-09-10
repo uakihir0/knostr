@@ -307,6 +307,8 @@ class RelayPool {
                     try {
                         subscription.onRequestSending?.invoke(connection.url)
                         sendRequest(connection, subscription)
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         // The relay never received the REQ. Reporting it lets a
                         // query stop waiting on a relay that cannot answer.
