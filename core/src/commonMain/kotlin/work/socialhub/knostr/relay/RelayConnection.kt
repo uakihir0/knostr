@@ -1,6 +1,7 @@
 package work.socialhub.knostr.relay
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import work.socialhub.knostr.entity.NostrEvent
@@ -24,6 +25,7 @@ class RelayConnection(
 
     private var reconnectAttempts = 0
     private var reconnectScope: CoroutineScope? = null
+    private var reconnectJob: Job? = null
     private var intentionallyClosed = false
 
     // Callbacks
@@ -52,9 +54,17 @@ class RelayConnection(
         client.open()
     }
 
-    /** Close WebSocket connection */
+    /**
+     * Close WebSocket connection.
+     *
+     * A reconnect that is already waiting out its backoff is cancelled here.
+     * Otherwise closing the pool would still leave a timer that opens a fresh
+     * socket seconds later, with nobody left holding a reference to it.
+     */
     fun close() {
         intentionallyClosed = true
+        reconnectJob?.cancel()
+        reconnectJob = null
         client.close()
     }
 
@@ -91,24 +101,34 @@ class RelayConnection(
     }
 
     private fun setupClient() {
+        // A listener queued by a socket that has already been replaced must not
+        // be attributed to the current one: on JS the old socket's dispatch
+        // scope may still deliver a frame after attemptReconnect() has moved
+        // on, and the stale EOSE would then look like a reply to the REQ the
+        // new socket was just sent.
+        val source = client
         client.url(url)
         client.textListener = { text ->
-            onMessage(text)
+            if (source === client) onMessage(text)
         }
         client.onOpenListener = {
-            isOpen = true
-            reconnectAttempts = 0
-            onOpenCallback?.invoke()
+            if (source === client) {
+                isOpen = true
+                reconnectAttempts = 0
+                onOpenCallback?.invoke()
+            }
         }
         client.onCloseListener = {
-            isOpen = false
-            onCloseCallback?.invoke()
-            if (autoReconnect && !intentionallyClosed && reconnectAttempts < maxReconnectAttempts) {
-                attemptReconnect()
+            if (source === client) {
+                isOpen = false
+                onCloseCallback?.invoke()
+                if (autoReconnect && !intentionallyClosed && reconnectAttempts < maxReconnectAttempts) {
+                    attemptReconnect()
+                }
             }
         }
         client.onErrorListener = { e ->
-            onErrorCallback?.invoke(e)
+            if (source === client) onErrorCallback?.invoke(e)
         }
     }
 
@@ -116,8 +136,9 @@ class RelayConnection(
         val delayMs = (reconnectDelayMs * (1L shl reconnectAttempts.coerceAtMost(5)))
             .coerceAtMost(30_000)
         reconnectAttempts++
-        reconnectScope?.launch {
+        reconnectJob = reconnectScope?.launch {
             delay(delayMs)
+            if (intentionallyClosed) return@launch
             try {
                 client = WebsocketRequest()
                 setupClient()

@@ -39,8 +39,19 @@ class TimelineStream(
     private var eventChannel: Channel<NostrEvent>? = null
     private val prefetchedUsers = mutableMapOf<String, NostrUser>()
 
-    /** Start streaming home timeline for the given list of followed pubkeys */
+    /**
+     * Start streaming home timeline for the given list of followed pubkeys.
+     *
+     * Starting an already-running stream restarts it. Overwriting the scope,
+     * channel and subscription id instead would leave the previous REQ on every
+     * relay with no id left to close it, so its events would keep arriving
+     * through a channel whose processor is gone.
+     *
+     * An empty list stops a running stream: the subscription that is still on
+     * the relays would otherwise keep delivering notes for the old follow list.
+     */
     suspend fun start(followingPubkeys: List<String>) {
+        if (subscriptionId != null || scope != null) stop()
         if (followingPubkeys.isEmpty()) return
 
         val newScope = CoroutineScope(SupervisorJob())

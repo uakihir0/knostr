@@ -19,7 +19,9 @@ interface EventResource {
     /**
      * Query events, waiting at most [timeoutMs] for EOSE instead of the
      * configured query timeout. [Response.isComplete] is false when the wait
-     * ran out first.
+     * ran out first, and also when a relay that received the query answered
+     * with CLOSED instead of EOSE: the result is then missing that relay's
+     * events.
      *
      * An implementation that receives events one by one should override this to
      * report the events it collected before the wait ran out, the way
