@@ -103,6 +103,29 @@ class RelayPoolResubscribeTest {
         )
     }
 
+    @Test
+    fun aFaultyRelayStateListenerDoesNotStopTheOthersOrTheResend() = runTest {
+        val pool = RelayPool()
+        val sent = pool.recordSentRequests()
+        val errors = mutableListOf<Pair<String, Exception>>()
+        pool.onErrorCallback = { url, e -> errors.add(url to e) }
+        pool.addRelayStateListener { _, _ -> throw IllegalStateException("listener failed") }
+        val states = mutableListOf<Pair<String, Boolean>>()
+        pool.addRelayStateListener { url, isOpen -> states.add(url to isOpen) }
+        val connection = pool.addRelay("wss://relay.example")
+        pool.bindScope(this)
+
+        val subId = pool.subscribe(listOf(FILTER), {})
+        connection.onOpenCallback?.invoke()
+        testScheduler.advanceUntilIdle()
+
+        // The exception must not skip the remaining listeners, and the open
+        // path still has to install the pool's subscriptions on the socket.
+        assertEquals(listOf("wss://relay.example" to true), states)
+        assertEquals(1, errors.size)
+        assertEquals(listOf("wss://relay.example" to subId), sent)
+    }
+
     /** Replaces the REQ write with a log of (relay url, subscription id). */
     private fun RelayPool.recordSentRequests(): List<Pair<String, String>> {
         val sent = mutableListOf<Pair<String, String>>()

@@ -269,7 +269,14 @@ class RelayPool {
 
     private fun notifyRelayState(relayUrl: String, isOpen: Boolean) {
         for (listener in relayStateListeners.toList()) {
-            listener(relayUrl, isOpen)
+            // One faulty observer must not stop the others, and on an open it
+            // must not prevent the subscriptions from being resent below: the
+            // socket would stay open with nothing listening on it.
+            try {
+                listener(relayUrl, isOpen)
+            } catch (e: Exception) {
+                onErrorCallback?.invoke(relayUrl, e)
+            }
         }
     }
 
