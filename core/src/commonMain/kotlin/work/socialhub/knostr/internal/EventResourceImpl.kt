@@ -6,7 +6,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.AtomicBoolean
+import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.time.Clock
 import work.socialhub.knostr.EventKind
@@ -45,28 +46,54 @@ class EventResourceImpl(
     ): Response<List<NostrEvent>> {
         try {
             val eventChannel = Channel<NostrEvent>(Channel.UNLIMITED)
-            val eoseDeferred = CompletableDeferred<Unit>()
+            val allRepliedDeferred = CompletableDeferred<Unit>()
 
-            val expectedEose = relayPool.getConnectedRelays().size.coerceAtLeast(1)
-            val eoseCount = AtomicInt(0)
+            val expectedReplies = relayPool.getConnectedRelays().size.coerceAtLeast(1)
+            val repliedRelays = AtomicReference(emptySet<String>())
+            val sawEose = AtomicBoolean(false)
+
+            // Replies are tracked per relay url rather than counted: a relay
+            // that answers twice (an EOSE followed by a CLOSED) must not stand
+            // in for one that has not answered at all.
+            fun markReplied(relayUrl: String) {
+                while (true) {
+                    val current = repliedRelays.load()
+                    if (relayUrl in current) return
+                    val updated = current + relayUrl
+                    if (repliedRelays.compareAndSet(current, updated)) {
+                        if (updated.size >= expectedReplies) {
+                            allRepliedDeferred.complete(Unit)
+                        }
+                        return
+                    }
+                }
+            }
 
             val subId = relayPool.subscribe(
                 filters = filters,
                 onEvent = { event ->
                     eventChannel.trySend(event)
                 },
-                onEose = { _ ->
-                    if (eoseCount.fetchAndAdd(1) + 1 >= expectedEose) {
-                        eoseDeferred.complete(Unit)
-                    }
+                onEose = { relayUrl ->
+                    sawEose.store(true)
+                    markReplied(relayUrl)
+                },
+                // A relay that ends the subscription (auth required, rate
+                // limited, filter rejected) never sends an EOSE. Treating that
+                // as its reply is what keeps one such relay from holding every
+                // query open for the whole timeout. It does not count towards
+                // completeness though: a query answered only by CLOSED has no
+                // relay that reported its stored events in full.
+                onClosed = { relayUrl, _ ->
+                    markReplied(relayUrl)
                 },
             )
 
             val isComplete: Boolean
             try {
                 isComplete = withTimeoutOrNull(timeoutMs) {
-                    eoseDeferred.await()
-                    true
+                    allRepliedDeferred.await()
+                    sawEose.load()
                 } ?: false
             } finally {
                 // The caller may be cancelled by now, and the subscription must

@@ -15,6 +15,13 @@ data class Subscription(
     val onEvent: (NostrEvent) -> Unit,
     /** Invoked when a relay signals end-of-stored-events, with the relay URL. */
     val onEose: ((relayUrl: String) -> Unit)? = null,
+    /**
+     * Invoked when a relay ends this subscription with CLOSED (NIP-01), e.g.
+     * because it requires authentication or rate-limited the request. That
+     * relay will never send an EOSE, so a caller counting relay replies has to
+     * treat this as the reply.
+     */
+    val onClosed: ((relayUrl: String, message: String) -> Unit)? = null,
 ) {
     private val seenEventIds = LinkedHashSet<String>()
     private val seenEventIdsLock = AtomicInt(0)

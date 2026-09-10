@@ -71,6 +71,9 @@ class RelayPool {
         connection.onEoseCallback = { subId ->
             subscriptions.load()[subId]?.onEose?.invoke(url)
         }
+        connection.onClosedCallback = { subId, message ->
+            subscriptions.load()[subId]?.onClosed?.invoke(url, message)
+        }
         connection.onNoticeCallback = { message ->
             onNoticeCallback?.invoke(url, message)
         }
@@ -165,9 +168,10 @@ class RelayPool {
         filters: List<NostrFilter>,
         onEvent: (NostrEvent) -> Unit,
         onEose: ((relayUrl: String) -> Unit)? = null,
+        onClosed: ((relayUrl: String, message: String) -> Unit)? = null,
     ): String {
         val subId = generateSubscriptionId()
-        val subscription = Subscription(subId, filters, onEvent, onEose)
+        val subscription = Subscription(subId, filters, onEvent, onEose, onClosed)
         mutex.withLock {
             addSubscription(subscription)
             try {
