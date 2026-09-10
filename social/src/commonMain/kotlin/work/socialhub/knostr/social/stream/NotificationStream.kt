@@ -2,8 +2,10 @@ package work.socialhub.knostr.social.stream
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -39,19 +41,28 @@ class NotificationStream(
 
     private var subscriptionId: String? = null
     private var scope: CoroutineScope? = null
+    private var processorJob: Job? = null
     private var eventChannel: Channel<NostrEvent>? = null
     private val localUsers = mutableMapOf<String, NostrUser>()
     private val localUsersMutex = Mutex()
 
-    /** Start streaming notifications for the given pubkey */
+    /**
+     * Start streaming notifications for the given pubkey.
+     *
+     * Starting an already-running stream restarts it, for the same reason as
+     * [TimelineStream.start]: the previous subscription id would be lost, so the
+     * REQ it installed on every relay could never be closed.
+     */
     suspend fun start(myPubkey: String) {
+        if (subscriptionId != null || scope != null) stop()
+
         val newScope = CoroutineScope(SupervisorJob())
         scope = newScope
 
         val channel = Channel<NostrEvent>(Channel.UNLIMITED)
         eventChannel = channel
 
-        newScope.launch {
+        processorJob = newScope.launch {
             for (event in channel) {
                 try {
                     when (event.kind) {
@@ -159,6 +170,10 @@ class NotificationStream(
         }
         eventChannel?.close()
         eventChannel = null
+        // Joining the processor before the scope dies keeps a half-handled event
+        // from firing a callback after stop() returned.
+        processorJob?.cancelAndJoin()
+        processorJob = null
         scope?.cancel()
         scope = null
         localUsersMutex.withLock {
