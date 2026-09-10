@@ -84,6 +84,34 @@ class EventResourceCompletenessTest {
         assertTrue(pool.activeSubscriptionIds().isEmpty(), "the subscription should be dropped")
     }
 
+    @Test
+    fun queryReturnsAsSoonAsTheRelayClosesTheSubscription() = runTest {
+        val config = NostrConfig().apply { queryTimeoutMs = 60_000 }
+        val pool = RelayPool()
+        val connection = pool.addRelay("wss://relay.example.invalid")
+        val resource = EventResourceImpl(config, pool)
+
+        val query = async {
+            resource.queryEventsWithTimeout(
+                filters = listOf(NostrFilter(kinds = listOf(EventKind.TEXT_NOTE))),
+                timeoutMs = 30_000,
+            )
+        }
+        val subscriptionId = pool.awaitSubscriptionId()
+        // A relay that requires auth, rate-limits the request or rejects the
+        // filter answers with CLOSED and then stays silent forever. Waiting for
+        // an EOSE it will never send is what burnt the whole timeout.
+        connection.onClosedCallback?.invoke(subscriptionId, "auth-required")
+
+        val response = query.await()
+
+        assertFalse(response.isComplete, "no relay reported its stored events in full")
+        assertTrue(
+            testScheduler.currentTime < 30_000,
+            "the query should not wait out its timeout, but waited ${testScheduler.currentTime}ms",
+        )
+    }
+
     /** Waits for the query coroutine to register its subscription. */
     private suspend fun RelayPool.awaitSubscriptionId(): String {
         repeat(SUBSCRIPTION_ATTEMPTS) {
