@@ -43,8 +43,19 @@ class RelayPool {
     var onAuthCallback: ((String, String) -> Unit)? = null
     var onErrorCallback: ((String, Exception) -> Unit)? = null
 
-    /** Add a relay connection */
+    /**
+     * Add a relay connection.
+     *
+     * Adding a url that is already registered returns the existing connection
+     * instead of replacing it: a second [RelayConnection] for the same relay
+     * would open a duplicate socket that nothing ever closes, and the
+     * subscriptions the pool tracks would only reach whichever of the two the
+     * map happened to keep. [config] is therefore only honoured for a url the
+     * pool does not know yet.
+     */
     fun addRelay(url: String, config: NostrConfig? = null): RelayConnection {
+        connections[url]?.let { return it }
+
         val connection = RelayConnection(
             url = url,
             autoReconnect = config?.autoReconnect ?: false,
@@ -69,6 +80,13 @@ class RelayPool {
         connection.onErrorCallback = { e ->
             onErrorCallback?.invoke(url, e)
         }
+        connection.onOpenCallback = {
+            notifyRelayState(url, true)
+            resendSubscriptions(connection)
+        }
+        connection.onCloseCallback = {
+            notifyRelayState(url, false)
+        }
         connections[url] = connection
         return connection
     }
@@ -78,9 +96,25 @@ class RelayPool {
         connections.remove(url)?.close()
     }
 
+    /**
+     * Listen for relay sockets opening and closing.
+     *
+     * Callers that surface a connection state (a UI indicator, a stream
+     * lifecycle callback) need this: a single relay dropping is normal, so only
+     * the pool knows whether anything is still reachable. Listeners are held as
+     * a list because several streams share one pool.
+     */
+    fun addRelayStateListener(listener: (relayUrl: String, isOpen: Boolean) -> Unit) {
+        relayStateListeners.add(listener)
+    }
+
+    fun removeRelayStateListener(listener: (relayUrl: String, isOpen: Boolean) -> Unit) {
+        relayStateListeners.remove(listener)
+    }
+
     /** Connect to all relays using the provided CoroutineScope */
     suspend fun connectAll(scope: CoroutineScope) {
-        poolScope = scope
+        bindScope(scope)
         mutex.withLock {
             for (connection in connections.values) {
                 connection.setReconnectScope(scope)
@@ -139,7 +173,7 @@ class RelayPool {
             try {
                 for (connection in connections.values) {
                     if (connection.isOpen) {
-                        connection.sendReq(subId, filters)
+                        sendRequest(connection, subscription)
                     }
                 }
             } catch (e: Throwable) {
@@ -147,6 +181,8 @@ class RelayPool {
                 throw e
             }
         }
+        // Relays that are still connecting receive this subscription from
+        // resendSubscriptions() once their socket opens.
         return subId
     }
 
@@ -179,6 +215,56 @@ class RelayPool {
     }
 
     private var poolScope: CoroutineScope? = null
+    private val relayStateListeners = mutableListOf<(String, Boolean) -> Unit>()
+
+    /**
+     * How a subscription is handed to one relay. Overridden by tests, which have
+     * no socket to write to.
+     */
+    internal var sendRequest: suspend (RelayConnection, Subscription) -> Unit =
+        { connection, subscription ->
+            connection.sendReq(subscription.id, subscription.filters)
+        }
+
+    /** Scope used for work that starts from a relay callback. */
+    internal fun bindScope(scope: CoroutineScope) {
+        poolScope = scope
+    }
+
+    /**
+     * Send every tracked subscription to a relay whose socket just opened.
+     *
+     * A REQ only reaches relays that were already connected when [subscribe]
+     * ran, and a relay that reconnects starts with no subscriptions at all.
+     * Without this the pool reports itself connected while delivering nothing:
+     * the relay is waiting for a REQ that was sent to a socket which no longer
+     * exists.
+     */
+    private fun resendSubscriptions(connection: RelayConnection) {
+        val current = subscriptions.load().values.toList()
+        if (current.isEmpty()) return
+        val scope = poolScope ?: return
+        scope.launch {
+            mutex.withLock {
+                for (subscription in current) {
+                    // Still tracked? The caller may have unsubscribed while the
+                    // socket was opening.
+                    if (subscription.id !in subscriptions.load()) continue
+                    try {
+                        sendRequest(connection, subscription)
+                    } catch (e: Exception) {
+                        onErrorCallback?.invoke(connection.url, e)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun notifyRelayState(relayUrl: String, isOpen: Boolean) {
+        for (listener in relayStateListeners.toList()) {
+            listener(relayUrl, isOpen)
+        }
+    }
 
     // The subscription map is swapped with compare-and-set so that adding and
     // removing never lose each other's update, even outside the mutex.
