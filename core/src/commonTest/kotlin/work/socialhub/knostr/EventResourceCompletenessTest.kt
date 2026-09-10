@@ -369,6 +369,43 @@ class EventResourceCompletenessTest {
         )
     }
 
+    @Test
+    fun aFailedInitialWriteDoesNotKillTheQuery() = runTest {
+        val config = NostrConfig().apply { queryTimeoutMs = 60_000 }
+        val pool = RelayPool()
+        pool.sendRequest = { connection, _ ->
+            if (connection.url == "wss://broken.example") {
+                throw IllegalStateException("socket is gone")
+            }
+        }
+        pool.bindScope(this)
+        val broken = pool.addRelay("wss://broken.example")
+        val healthy = pool.addRelay("wss://healthy.example")
+        broken.client.onOpenListener(broken.client)
+        healthy.client.onOpenListener(healthy.client)
+        testScheduler.runCurrent()
+        val resource = EventResourceImpl(config, pool)
+
+        val query = async {
+            resource.queryEventsWithTimeout(
+                filters = listOf(NostrFilter(kinds = listOf(EventKind.TEXT_NOTE))),
+                timeoutMs = 5_000,
+            )
+        }
+        val subscriptionId = pool.awaitSubscriptionId()
+        healthy.onEoseCallback?.invoke(subscriptionId)
+
+        val response = query.await()
+
+        // The relay the REQ could not be written to is reported as one that
+        // will not answer, so the query survives it and stays incomplete.
+        assertFalse(response.isComplete)
+        assertTrue(
+            testScheduler.currentTime < 5_000,
+            "the query should not wait out its timeout, but waited ${testScheduler.currentTime}ms",
+        )
+    }
+
     /** Waits for the query coroutine to register its subscription. */
     private suspend fun RelayPool.awaitSubscriptionId(): String {
         repeat(SUBSCRIPTION_ATTEMPTS) {

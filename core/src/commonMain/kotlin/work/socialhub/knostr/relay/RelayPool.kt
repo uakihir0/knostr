@@ -1,5 +1,6 @@
 package work.socialhub.knostr.relay
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -165,6 +166,21 @@ class RelayPool {
     }
 
     /**
+     * Subscription setup for callers compiled before the reply callbacks were
+     * added. Kept so an artifact compiled against an older core keeps linking;
+     * new code uses the overload with the full callback set.
+     */
+    @Deprecated(
+        "Use the overload that also reports the request callbacks",
+        level = DeprecationLevel.HIDDEN,
+    )
+    suspend fun subscribe(
+        filters: List<NostrFilter>,
+        onEvent: (NostrEvent) -> Unit,
+        onEose: ((relayUrl: String) -> Unit)? = null,
+    ): String = subscribe(filters, onEvent, onEose, null, null, null)
+
+    /**
      * Subscribe to events across all connected relays.
      *
      * Nothing stays registered unless the id is returned: the caller has no way
@@ -195,7 +211,17 @@ class RelayPool {
                 for (connection in connections.values) {
                     if (connection.isOpen) {
                         subscription.onRequestSending?.invoke(connection.url)
-                        sendRequest(connection, subscription)
+                        try {
+                            sendRequest(connection, subscription)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            // One relay that cannot be written to must not take
+                            // the subscription down for the relays that were
+                            // reached.
+                            subscription.onRequestFailed?.invoke(connection.url, e)
+                            onErrorCallback?.invoke(connection.url, e)
+                        }
                     }
                 }
             } catch (e: Throwable) {
@@ -220,7 +246,15 @@ class RelayPool {
         mutex.withLock {
             for (connection in connections.values) {
                 if (connection.isOpen) {
-                    connection.sendClose(subscriptionId)
+                    try {
+                        connection.sendClose(subscriptionId)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // The subscription is already dropped locally, so a
+                        // CLOSE that cannot be written must not fail the caller.
+                        onErrorCallback?.invoke(connection.url, e)
+                    }
                 }
             }
         }

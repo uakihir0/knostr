@@ -101,24 +101,34 @@ class RelayConnection(
     }
 
     private fun setupClient() {
+        // A listener queued by a socket that has already been replaced must not
+        // be attributed to the current one: on JS the old socket's dispatch
+        // scope may still deliver a frame after attemptReconnect() has moved
+        // on, and the stale EOSE would then look like a reply to the REQ the
+        // new socket was just sent.
+        val source = client
         client.url(url)
         client.textListener = { text ->
-            onMessage(text)
+            if (source === client) onMessage(text)
         }
         client.onOpenListener = {
-            isOpen = true
-            reconnectAttempts = 0
-            onOpenCallback?.invoke()
+            if (source === client) {
+                isOpen = true
+                reconnectAttempts = 0
+                onOpenCallback?.invoke()
+            }
         }
         client.onCloseListener = {
-            isOpen = false
-            onCloseCallback?.invoke()
-            if (autoReconnect && !intentionallyClosed && reconnectAttempts < maxReconnectAttempts) {
-                attemptReconnect()
+            if (source === client) {
+                isOpen = false
+                onCloseCallback?.invoke()
+                if (autoReconnect && !intentionallyClosed && reconnectAttempts < maxReconnectAttempts) {
+                    attemptReconnect()
+                }
             }
         }
         client.onErrorListener = { e ->
-            onErrorCallback?.invoke(e)
+            if (source === client) onErrorCallback?.invoke(e)
         }
     }
 
