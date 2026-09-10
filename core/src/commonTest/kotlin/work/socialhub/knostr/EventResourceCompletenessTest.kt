@@ -226,6 +226,73 @@ class EventResourceCompletenessTest {
         )
     }
 
+    @Test
+    fun aRelayThatClosesTheSubscriptionKeepsTheQueryIncomplete() = runTest {
+        val config = NostrConfig().apply { queryTimeoutMs = 60_000 }
+        val pool = RelayPool()
+        pool.sendRequest = { _, _ -> }
+        pool.bindScope(this)
+        val first = pool.addRelay("wss://first.example")
+        val second = pool.addRelay("wss://second.example")
+        val resource = EventResourceImpl(config, pool)
+
+        val query = async {
+            resource.queryEventsWithTimeout(
+                filters = listOf(NostrFilter(kinds = listOf(EventKind.TEXT_NOTE))),
+                timeoutMs = 30_000,
+            )
+        }
+        val subscriptionId = pool.awaitSubscriptionId()
+        first.onOpenCallback?.invoke()
+        second.onOpenCallback?.invoke()
+        testScheduler.runCurrent()
+        first.onEoseCallback?.invoke(subscriptionId)
+        yield()
+        assertFalse(query.isCompleted, "the second relay has not replied yet")
+        // The second relay ended its subscription without reporting anything,
+        // so the wait is over, but the result is still missing its events.
+        second.onClosedCallback?.invoke(subscriptionId, "auth-required")
+
+        val response = query.await()
+
+        assertFalse(response.isComplete)
+        assertTrue(
+            testScheduler.currentTime < 30_000,
+            "the query should not wait out its timeout, but waited ${testScheduler.currentTime}ms",
+        )
+    }
+
+    @Test
+    fun aRelayThatOpensAfterTheQueryCompletedIsNotWaitedFor() = runTest {
+        val config = NostrConfig().apply { queryTimeoutMs = 60_000 }
+        val pool = RelayPool()
+        pool.sendRequest = { _, _ -> }
+        pool.bindScope(this)
+        val first = pool.addRelay("wss://first.example")
+        val resource = EventResourceImpl(config, pool)
+
+        val query = async {
+            resource.queryEventsWithTimeout(
+                filters = listOf(NostrFilter(kinds = listOf(EventKind.TEXT_NOTE))),
+                timeoutMs = 30_000,
+            )
+        }
+        val subscriptionId = pool.awaitSubscriptionId()
+        first.onOpenCallback?.invoke()
+        testScheduler.runCurrent()
+        // The only participant answered, so the query is decided now.
+        first.onEoseCallback?.invoke(subscriptionId)
+        // A relay that opens right after is handed the subscription, but it
+        // joined a finished query and must not extend or invalidate it.
+        val late = pool.addRelay("wss://late.example")
+        late.onOpenCallback?.invoke()
+        testScheduler.runCurrent()
+
+        val response = query.await()
+
+        assertTrue(response.isComplete)
+    }
+
     /** Waits for the query coroutine to register its subscription. */
     private suspend fun RelayPool.awaitSubscriptionId(): String {
         repeat(SUBSCRIPTION_ATTEMPTS) {

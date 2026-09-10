@@ -178,8 +178,8 @@ class RelayPool {
             try {
                 for (connection in connections.values) {
                     if (connection.isOpen) {
-                        subscription.onRequestSent?.invoke(connection.url)
                         sendRequest(connection, subscription)
+                        subscription.onRequestSent?.invoke(connection.url)
                     }
                 }
             } catch (e: Throwable) {
@@ -257,8 +257,8 @@ class RelayPool {
                     // socket was opening.
                     if (subscription.id !in subscriptions.load()) continue
                     try {
-                        subscription.onRequestSent?.invoke(connection.url)
                         sendRequest(connection, subscription)
+                        subscription.onRequestSent?.invoke(connection.url)
                     } catch (e: Exception) {
                         onErrorCallback?.invoke(connection.url, e)
                     }
