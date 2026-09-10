@@ -293,6 +293,82 @@ class EventResourceCompletenessTest {
         assertTrue(response.isComplete)
     }
 
+    @Test
+    fun aReconnectedRelayHasToAnswerTheResentRequest() = runTest {
+        val config = NostrConfig().apply { queryTimeoutMs = 60_000 }
+        val pool = RelayPool()
+        pool.sendRequest = { _, _ -> }
+        pool.bindScope(this)
+        val first = pool.addRelay("wss://first.example")
+        val second = pool.addRelay("wss://second.example")
+        val resource = EventResourceImpl(config, pool)
+
+        val query = async {
+            resource.queryEventsWithTimeout(
+                filters = listOf(NostrFilter(kinds = listOf(EventKind.TEXT_NOTE))),
+                timeoutMs = 30_000,
+            )
+        }
+        val subscriptionId = pool.awaitSubscriptionId()
+        first.onOpenCallback?.invoke()
+        second.onOpenCallback?.invoke()
+        testScheduler.runCurrent()
+        first.onEoseCallback?.invoke(subscriptionId)
+        // The first relay drops and reconnects, and the pool resends its REQ.
+        // The EOSE from the socket that died says nothing about the new one.
+        first.onOpenCallback?.invoke()
+        testScheduler.runCurrent()
+        second.onEoseCallback?.invoke(subscriptionId)
+        yield()
+        assertFalse(
+            query.isCompleted,
+            "the reconnected relay has not answered the resent request",
+        )
+
+        first.onEoseCallback?.invoke(subscriptionId)
+
+        assertTrue(query.await().isComplete)
+    }
+
+    @Test
+    fun aRelayWhoseResentRequestCannotBeWrittenKeepsTheQueryIncomplete() = runTest {
+        val config = NostrConfig().apply { queryTimeoutMs = 60_000 }
+        val pool = RelayPool()
+        var refuseWrites = false
+        pool.sendRequest = { _, _ ->
+            if (refuseWrites) throw IllegalStateException("socket is gone")
+        }
+        pool.bindScope(this)
+        val first = pool.addRelay("wss://first.example")
+        val second = pool.addRelay("wss://second.example")
+        val resource = EventResourceImpl(config, pool)
+
+        val query = async {
+            resource.queryEventsWithTimeout(
+                filters = listOf(NostrFilter(kinds = listOf(EventKind.TEXT_NOTE))),
+                timeoutMs = 30_000,
+            )
+        }
+        val subscriptionId = pool.awaitSubscriptionId()
+        first.onOpenCallback?.invoke()
+        second.onOpenCallback?.invoke()
+        testScheduler.runCurrent()
+        first.onEoseCallback?.invoke(subscriptionId)
+        // The second relay's socket opens again, but the REQ cannot be written:
+        // the query must not hold its timeout waiting for an answer.
+        refuseWrites = true
+        second.onOpenCallback?.invoke()
+        testScheduler.runCurrent()
+
+        val response = query.await()
+
+        assertFalse(response.isComplete, "the relay never received the request")
+        assertTrue(
+            testScheduler.currentTime < 30_000,
+            "the query should not wait for a relay that cannot be written to, but waited ${testScheduler.currentTime}ms",
+        )
+    }
+
     /** Waits for the query coroutine to register its subscription. */
     private suspend fun RelayPool.awaitSubscriptionId(): String {
         repeat(SUBSCRIPTION_ATTEMPTS) {

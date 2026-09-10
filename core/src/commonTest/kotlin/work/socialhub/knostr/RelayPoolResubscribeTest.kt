@@ -126,6 +126,21 @@ class RelayPoolResubscribeTest {
         assertEquals(listOf("wss://relay.example" to subId), sent)
     }
 
+    @Test
+    fun aRemovedRelayStateListenerStopsSeeingState() {
+        val pool = RelayPool()
+        val states = mutableListOf<Pair<String, Boolean>>()
+        val listener: (String, Boolean) -> Unit = { url, isOpen -> states.add(url to isOpen) }
+        pool.addRelayStateListener(listener)
+        val connection = pool.addRelay("wss://relay.example")
+
+        connection.onOpenCallback?.invoke()
+        pool.removeRelayStateListener(listener)
+        connection.onCloseCallback?.invoke()
+
+        assertEquals(listOf("wss://relay.example" to true), states)
+    }
+
     /** Replaces the REQ write with a log of (relay url, subscription id). */
     private fun RelayPool.recordSentRequests(): List<Pair<String, String>> {
         val sent = mutableListOf<Pair<String, String>>()

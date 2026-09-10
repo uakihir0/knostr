@@ -23,16 +23,24 @@ data class Subscription(
      */
     val onClosed: ((relayUrl: String, message: String) -> Unit)? = null,
     /**
-     * Invoked after the REQ for this subscription has been written to a relay.
+     * Invoked before the REQ for this subscription is handed to a relay, which
+     * enrolls the relay as a participant of the query.
      *
      * A subscription reaches the relays that were open when it was created and
      * every relay whose socket opens later, so a caller that counts replies has
-     * to learn about both. This is the only place that reports which relays the
-     * subscription was actually handed to. A write that fails is reported
-     * nowhere: that relay never received the subscription, so it is not
-     * expected to answer.
+     * to learn about both. A resend to a relay starts a new reply generation:
+     * an EOSE it sent over its previous socket says nothing about the new one.
+     *
+     * A write that fails is reported through [onRequestFailed], which returns
+     * the relay to the state of one that will not answer.
      */
-    val onRequestSent: ((relayUrl: String) -> Unit)? = null,
+    val onRequestSending: ((relayUrl: String) -> Unit)? = null,
+    /**
+     * Invoked when the REQ for this subscription could not be written to a
+     * relay. That relay never received the subscription, so a caller waiting
+     * for replies has to stop expecting one from it.
+     */
+    val onRequestFailed: ((relayUrl: String, error: Exception) -> Unit)? = null,
 ) {
     private val seenEventIds = LinkedHashSet<String>()
     private val seenEventIdsLock = AtomicInt(0)

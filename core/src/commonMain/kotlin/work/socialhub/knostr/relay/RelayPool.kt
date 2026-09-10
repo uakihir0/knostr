@@ -108,11 +108,18 @@ class RelayPool {
      * a list because several streams share one pool.
      */
     fun addRelayStateListener(listener: (relayUrl: String, isOpen: Boolean) -> Unit) {
-        relayStateListeners.add(listener)
+        while (true) {
+            val current = relayStateListeners.load()
+            if (relayStateListeners.compareAndSet(current, current + listener)) return
+        }
     }
 
     fun removeRelayStateListener(listener: (relayUrl: String, isOpen: Boolean) -> Unit) {
-        relayStateListeners.remove(listener)
+        while (true) {
+            val current = relayStateListeners.load()
+            if (listener !in current) return
+            if (relayStateListeners.compareAndSet(current, current - listener)) return
+        }
     }
 
     /** Connect to all relays using the provided CoroutineScope */
@@ -169,17 +176,26 @@ class RelayPool {
         onEvent: (NostrEvent) -> Unit,
         onEose: ((relayUrl: String) -> Unit)? = null,
         onClosed: ((relayUrl: String, message: String) -> Unit)? = null,
-        onRequestSent: ((relayUrl: String) -> Unit)? = null,
+        onRequestSending: ((relayUrl: String) -> Unit)? = null,
+        onRequestFailed: ((relayUrl: String, error: Exception) -> Unit)? = null,
     ): String {
         val subId = generateSubscriptionId()
-        val subscription = Subscription(subId, filters, onEvent, onEose, onClosed, onRequestSent)
+        val subscription = Subscription(
+            subId,
+            filters,
+            onEvent,
+            onEose,
+            onClosed,
+            onRequestSending,
+            onRequestFailed,
+        )
         mutex.withLock {
             addSubscription(subscription)
             try {
                 for (connection in connections.values) {
                     if (connection.isOpen) {
+                        subscription.onRequestSending?.invoke(connection.url)
                         sendRequest(connection, subscription)
-                        subscription.onRequestSent?.invoke(connection.url)
                     }
                 }
             } catch (e: Throwable) {
@@ -221,7 +237,10 @@ class RelayPool {
     }
 
     private var poolScope: CoroutineScope? = null
-    private val relayStateListeners = mutableListOf<(String, Boolean) -> Unit>()
+
+    // Add and remove swap the whole list, so a listener registered while a
+    // socket callback is notifying cannot corrupt the snapshot it iterates.
+    private val relayStateListeners = AtomicReference<List<(String, Boolean) -> Unit>>(emptyList())
 
     /**
      * How a subscription is handed to one relay. Overridden by tests, which have
@@ -257,9 +276,12 @@ class RelayPool {
                     // socket was opening.
                     if (subscription.id !in subscriptions.load()) continue
                     try {
+                        subscription.onRequestSending?.invoke(connection.url)
                         sendRequest(connection, subscription)
-                        subscription.onRequestSent?.invoke(connection.url)
                     } catch (e: Exception) {
+                        // The relay never received the REQ. Reporting it lets a
+                        // query stop waiting on a relay that cannot answer.
+                        subscription.onRequestFailed?.invoke(connection.url, e)
                         onErrorCallback?.invoke(connection.url, e)
                     }
                 }
@@ -268,7 +290,7 @@ class RelayPool {
     }
 
     private fun notifyRelayState(relayUrl: String, isOpen: Boolean) {
-        for (listener in relayStateListeners.toList()) {
+        for (listener in relayStateListeners.load()) {
             // One faulty observer must not stop the others, and on an open it
             // must not prevent the subscriptions from being resent below: the
             // socket would stay open with nothing listening on it.

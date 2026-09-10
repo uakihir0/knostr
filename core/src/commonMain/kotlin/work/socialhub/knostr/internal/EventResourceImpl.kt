@@ -75,11 +75,19 @@ class EventResourceImpl(
                 }
             }
 
-            fun markRequested(relayUrl: String) {
+            fun markRequesting(relayUrl: String) {
                 while (true) {
                     val current = replies.load()
-                    if (current.sealed || relayUrl in current.requested) return
-                    val updated = current.copy(requested = current.requested + relayUrl)
+                    if (current.sealed) return
+                    // A resend starts a new reply generation for the relay: an
+                    // EOSE it sent over the socket that just died says nothing
+                    // about the socket the pool is writing to now.
+                    val updated = current.copy(
+                        requested = current.requested + relayUrl,
+                        replied = current.replied - relayUrl,
+                        eose = current.eose - relayUrl,
+                    )
+                    if (updated == current) return
                     if (replies.compareAndSet(current, updated)) {
                         maybeComplete()
                         return
@@ -88,7 +96,7 @@ class EventResourceImpl(
             }
 
             // A relay is only expected to answer once the pool has actually
-            // sent it the REQ. Replies are tracked per relay url rather than
+            // handed it the REQ. Replies are tracked per relay url rather than
             // counted: a relay that answers twice (an EOSE followed by a
             // CLOSED) must not stand in for one that has not answered at all.
             fun markReplied(relayUrl: String, eose: Boolean) {
@@ -97,6 +105,25 @@ class EventResourceImpl(
                     val updated = current.copy(
                         replied = current.replied + relayUrl,
                         eose = if (eose) current.eose + relayUrl else current.eose,
+                    )
+                    if (updated == current) return
+                    if (replies.compareAndSet(current, updated)) {
+                        maybeComplete()
+                        return
+                    }
+                }
+            }
+
+            // The REQ never reached this relay, so it will not answer and the
+            // wait can move on. It reported nothing in full, so the result
+            // stays partial: this counts as a reply without an EOSE.
+            fun markRequestFailed(relayUrl: String) {
+                while (true) {
+                    val current = replies.load()
+                    if (current.sealed || relayUrl !in current.requested) return
+                    val updated = current.copy(
+                        replied = current.replied + relayUrl,
+                        eose = current.eose - relayUrl,
                     )
                     if (updated == current) return
                     if (replies.compareAndSet(current, updated)) {
@@ -125,10 +152,14 @@ class EventResourceImpl(
                 },
                 // The participants are the relays the pool hands this
                 // subscription to, which includes a relay that opens while the
-                // query waits. A reply from a relay that only joins later can
-                // then never finish the query on behalf of a silent one.
-                onRequestSent = { relayUrl ->
-                    markRequested(relayUrl)
+                // query waits. Enrollment happens before the REQ is written,
+                // so a reply from another relay cannot seal the query in the
+                // gap and shut out a relay that is being asked right now.
+                onRequestSending = { relayUrl ->
+                    markRequesting(relayUrl)
+                },
+                onRequestFailed = { relayUrl, _ ->
+                    markRequestFailed(relayUrl)
                 },
             )
             // A relay that answers while the first REQs are still going out
