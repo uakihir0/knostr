@@ -22,6 +22,15 @@ data class Subscription(
      * treat this as the reply.
      */
     val onClosed: ((relayUrl: String, message: String) -> Unit)? = null,
+    /**
+     * Invoked before the REQ for this subscription is written to a relay.
+     *
+     * A subscription reaches the relays that were open when it was created and
+     * every relay whose socket opens later, so a caller that counts replies has
+     * to learn about both. This is the only place that reports which relays the
+     * subscription was actually handed to.
+     */
+    val onRequestSent: ((relayUrl: String) -> Unit)? = null,
 ) {
     private val seenEventIds = LinkedHashSet<String>()
     private val seenEventIdsLock = AtomicInt(0)

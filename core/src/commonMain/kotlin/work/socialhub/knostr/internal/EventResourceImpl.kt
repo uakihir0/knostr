@@ -48,22 +48,44 @@ class EventResourceImpl(
             val eventChannel = Channel<NostrEvent>(Channel.UNLIMITED)
             val allRepliedDeferred = CompletableDeferred<Unit>()
 
-            val expectedReplies = relayPool.getConnectedRelays().size.coerceAtLeast(1)
+            val requestedRelays = AtomicReference(emptySet<String>())
             val repliedRelays = AtomicReference(emptySet<String>())
+            val installComplete = AtomicBoolean(false)
             val sawEose = AtomicBoolean(false)
 
             // Replies are tracked per relay url rather than counted: a relay
             // that answers twice (an EOSE followed by a CLOSED) must not stand
-            // in for one that has not answered at all.
+            // in for one that has not answered at all. Only a relay the pool
+            // actually handed the REQ to is expected to answer, and the wait
+            // cannot end while any of those is silent.
+            fun maybeComplete() {
+                if (!installComplete.load()) return
+                val requested = requestedRelays.load()
+                if (requested.isEmpty()) return
+                if (requested.all { it in repliedRelays.load() }) {
+                    allRepliedDeferred.complete(Unit)
+                }
+            }
+
+            fun markRequested(relayUrl: String) {
+                while (true) {
+                    val current = requestedRelays.load()
+                    if (relayUrl in current) return
+                    val updated = current + relayUrl
+                    if (requestedRelays.compareAndSet(current, updated)) {
+                        maybeComplete()
+                        return
+                    }
+                }
+            }
+
             fun markReplied(relayUrl: String) {
                 while (true) {
                     val current = repliedRelays.load()
                     if (relayUrl in current) return
                     val updated = current + relayUrl
                     if (repliedRelays.compareAndSet(current, updated)) {
-                        if (updated.size >= expectedReplies) {
-                            allRepliedDeferred.complete(Unit)
-                        }
+                        maybeComplete()
                         return
                     }
                 }
@@ -87,7 +109,19 @@ class EventResourceImpl(
                 onClosed = { relayUrl, _ ->
                     markReplied(relayUrl)
                 },
+                // The participants are the relays the pool hands this
+                // subscription to, which includes a relay that opens while the
+                // query waits. A reply from a relay that only joins later can
+                // then never finish the query on behalf of a silent one.
+                onRequestSent = { relayUrl ->
+                    markRequested(relayUrl)
+                },
             )
+            // A relay that answers while the first REQs are still going out
+            // must not end the wait for a relay the pool has not handed the
+            // subscription to yet.
+            installComplete.store(true)
+            maybeComplete()
 
             val isComplete: Boolean
             try {

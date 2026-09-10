@@ -169,14 +169,16 @@ class RelayPool {
         onEvent: (NostrEvent) -> Unit,
         onEose: ((relayUrl: String) -> Unit)? = null,
         onClosed: ((relayUrl: String, message: String) -> Unit)? = null,
+        onRequestSent: ((relayUrl: String) -> Unit)? = null,
     ): String {
         val subId = generateSubscriptionId()
-        val subscription = Subscription(subId, filters, onEvent, onEose, onClosed)
+        val subscription = Subscription(subId, filters, onEvent, onEose, onClosed, onRequestSent)
         mutex.withLock {
             addSubscription(subscription)
             try {
                 for (connection in connections.values) {
                     if (connection.isOpen) {
+                        subscription.onRequestSent?.invoke(connection.url)
                         sendRequest(connection, subscription)
                     }
                 }
@@ -255,6 +257,7 @@ class RelayPool {
                     // socket was opening.
                     if (subscription.id !in subscriptions.load()) continue
                     try {
+                        subscription.onRequestSent?.invoke(connection.url)
                         sendRequest(connection, subscription)
                     } catch (e: Exception) {
                         onErrorCallback?.invoke(connection.url, e)
