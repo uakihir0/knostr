@@ -15,13 +15,20 @@ data class Subscription(
     val onEvent: (NostrEvent) -> Unit,
     /** Invoked when a relay signals end-of-stored-events, with the relay URL. */
     val onEose: ((relayUrl: String) -> Unit)? = null,
+) {
+    // The reply callbacks are set by RelayPool instead of taken as constructor
+    // properties: Subscription is a published data class, and growing its
+    // constructor would change the constructor and copy() descriptors an
+    // already compiled caller links against.
+
     /**
      * Invoked when a relay ends this subscription with CLOSED (NIP-01), e.g.
      * because it requires authentication or rate-limited the request. That
      * relay will never send an EOSE, so a caller counting relay replies has to
      * treat this as the reply.
      */
-    val onClosed: ((relayUrl: String, message: String) -> Unit)? = null,
+    internal var onClosed: ((relayUrl: String, message: String) -> Unit)? = null
+
     /**
      * Invoked before the REQ for this subscription is handed to a relay, which
      * enrolls the relay as a participant of the query.
@@ -34,14 +41,15 @@ data class Subscription(
      * A write that fails is reported through [onRequestFailed], which returns
      * the relay to the state of one that will not answer.
      */
-    val onRequestSending: ((relayUrl: String) -> Unit)? = null,
+    internal var onRequestSending: ((relayUrl: String) -> Unit)? = null
+
     /**
      * Invoked when the REQ for this subscription could not be written to a
      * relay. That relay never received the subscription, so a caller waiting
      * for replies has to stop expecting one from it.
      */
-    val onRequestFailed: ((relayUrl: String, error: Exception) -> Unit)? = null,
-) {
+    internal var onRequestFailed: ((relayUrl: String, error: Exception) -> Unit)? = null
+
     private val seenEventIds = LinkedHashSet<String>()
     private val seenEventIdsLock = AtomicInt(0)
 

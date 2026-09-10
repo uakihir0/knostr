@@ -196,15 +196,10 @@ class RelayPool {
         onRequestFailed: ((relayUrl: String, error: Exception) -> Unit)? = null,
     ): String {
         val subId = generateSubscriptionId()
-        val subscription = Subscription(
-            subId,
-            filters,
-            onEvent,
-            onEose,
-            onClosed,
-            onRequestSending,
-            onRequestFailed,
-        )
+        val subscription = Subscription(subId, filters, onEvent, onEose)
+        subscription.onClosed = onClosed
+        subscription.onRequestSending = onRequestSending
+        subscription.onRequestFailed = onRequestFailed
         mutex.withLock {
             addSubscription(subscription)
             try {
