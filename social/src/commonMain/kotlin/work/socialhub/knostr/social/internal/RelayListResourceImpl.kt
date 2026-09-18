@@ -19,7 +19,7 @@ class RelayListResourceImpl(
     override suspend fun getRelayList(): Response<List<NostrRelayListEntry>> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get own relay list")
-        return getRelayList(signer.getPublicKey())
+        return getRelayList(signer.getPublicKeyAsync())
     }
 
     override suspend fun getRelayList(pubkey: String): Response<List<NostrRelayListEntry>> {
@@ -58,13 +58,13 @@ class RelayListResourceImpl(
         }
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.RELAY_LIST,
             tags = tags,
             content = "",
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }

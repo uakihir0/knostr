@@ -68,7 +68,7 @@ class ListResourceImpl(
             ?: throw NostrException("Signer is required to get own list")
 
         val filter = NostrFilter(
-            authors = listOf(signer.getPublicKey()),
+            authors = listOf(signer.getPublicKeyAsync()),
             kinds = listOf(EventKind.PEOPLE_LIST),
             dTags = listOf(name),
             limit = 1,
@@ -82,7 +82,7 @@ class ListResourceImpl(
     override suspend fun getLists(): Response<List<NostrList>> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get own lists")
-        return getLists(signer.getPublicKey())
+        return getLists(signer.getPublicKeyAsync())
     }
 
     override suspend fun getLists(pubkey: String): Response<List<NostrList>> {
@@ -103,7 +103,7 @@ class ListResourceImpl(
             ?: throw NostrException("Signer is required to get list")
 
         val filter = NostrFilter(
-            authors = listOf(signer.getPublicKey()),
+            authors = listOf(signer.getPublicKeyAsync()),
             kinds = listOf(EventKind.PEOPLE_LIST),
             dTags = listOf(name),
             limit = 1,
@@ -117,13 +117,13 @@ class ListResourceImpl(
         tags: List<List<String>>,
     ): Response<NostrEvent> {
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.PEOPLE_LIST,
             tags = tags,
             content = "",
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }

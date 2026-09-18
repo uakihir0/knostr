@@ -28,7 +28,7 @@ class MessageResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to send DM")
 
-        val myPubkey = signer.getPublicKey()
+        val myPubkey = signer.getPublicKeyAsync()
         val now = Clock.System.now().epochSeconds
 
         // Step 1: Create unsigned rumor (kind:14) — NOT signed
@@ -41,7 +41,7 @@ class MessageResourceImpl(
         )
 
         // Step 2: Create Seal (kind:13) — encrypt rumor for recipient, sign with sender's key
-        val sealContent = signer.nip44Encrypt(rumorJson, recipientPubkey)
+        val sealContent = signer.nip44EncryptAsync(rumorJson, recipientPubkey)
         val sealUnsigned = UnsignedEvent(
             pubkey = myPubkey,
             createdAt = randomTimestamp(now),
@@ -49,7 +49,7 @@ class MessageResourceImpl(
             tags = listOf(),
             content = sealContent,
         )
-        val seal = signer.sign(sealUnsigned)
+        val seal = signer.signAsync(sealUnsigned)
 
         // Step 3: Create Gift Wrap (kind:1059) with ephemeral key for recipient
         val giftWrapForRecipient = createGiftWrap(seal, recipientPubkey, now)
@@ -66,7 +66,7 @@ class MessageResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get DMs")
 
-        val myPubkey = signer.getPublicKey()
+        val myPubkey = signer.getPublicKeyAsync()
         val filter = NostrFilter(
             kinds = listOf(EventKind.GIFT_WRAP),
             pTags = listOf(myPubkey),
@@ -121,16 +121,16 @@ class MessageResourceImpl(
      * Unwrap a Gift Wrap event to extract the DM content.
      * Returns null if unwrapping fails (e.g., not addressed to us, invalid format).
      */
-    private fun unwrapGiftWrap(giftWrap: NostrEvent, signer: NostrSigner): NostrDirectMessage? {
+    private suspend fun unwrapGiftWrap(giftWrap: NostrEvent, signer: NostrSigner): NostrDirectMessage? {
         return try {
             // Decrypt outer layer: Gift Wrap → Seal
-            val sealJson = signer.nip44Decrypt(giftWrap.content, giftWrap.pubkey)
+            val sealJson = signer.nip44DecryptAsync(giftWrap.content, giftWrap.pubkey)
             val seal = InternalUtility.fromJson<NostrEvent>(sealJson)
 
             if (seal.kind != EventKind.SEAL) return null
 
             // Decrypt inner layer: Seal → Rumor
-            val rumorJson = signer.nip44Decrypt(seal.content, seal.pubkey)
+            val rumorJson = signer.nip44DecryptAsync(seal.content, seal.pubkey)
             val rumor = InternalUtility.fromJson<RumorEvent>(rumorJson)
 
             if (rumor.kind != EventKind.CHAT_MESSAGE) return null
@@ -202,10 +202,10 @@ class MessageResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to send DM")
 
-        val myPubkey = signer.getPublicKey()
+        val myPubkey = signer.getPublicKeyAsync()
         val now = Clock.System.now().epochSeconds
 
-        val encrypted = signer.nip04Encrypt(content, recipientPubkey)
+        val encrypted = signer.nip04EncryptAsync(content, recipientPubkey)
 
         val unsigned = UnsignedEvent(
             pubkey = myPubkey,
@@ -214,7 +214,7 @@ class MessageResourceImpl(
             tags = listOf(listOf("p", recipientPubkey)),
             content = encrypted,
         )
-        val event = signer.sign(unsigned)
+        val event = signer.signAsync(unsigned)
         nostr.events().publishEvent(event)
 
         return Response(event)
@@ -224,7 +224,7 @@ class MessageResourceImpl(
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get DMs")
 
-        val myPubkey = signer.getPublicKey()
+        val myPubkey = signer.getPublicKeyAsync()
 
         // Query kind:4 events addressed to us and sent by us
         val receivedFilter = NostrFilter(
@@ -252,7 +252,7 @@ class MessageResourceImpl(
 
     // --- Internal NIP-04 helpers ---
 
-    private fun decryptLegacyDm(event: NostrEvent, signer: NostrSigner, myPubkey: String): NostrDirectMessage? {
+    private suspend fun decryptLegacyDm(event: NostrEvent, signer: NostrSigner, myPubkey: String): NostrDirectMessage? {
         return try {
             if (event.kind != EventKind.ENCRYPTED_DM) return null
 
@@ -262,7 +262,7 @@ class MessageResourceImpl(
 
             // Determine the other party's pubkey for decryption
             val otherPubkey = if (event.pubkey == myPubkey) recipientPubkey else event.pubkey
-            val decrypted = signer.nip04Decrypt(event.content, otherPubkey)
+            val decrypted = signer.nip04DecryptAsync(event.content, otherPubkey)
 
             NostrDirectMessage(
                 id = event.id,
@@ -294,7 +294,7 @@ class MessageResourceImpl(
 
         // Group by conversation partner (the other party in each DM)
         val signer = nostr.signer()
-        val myPubkey = signer?.getPublicKey()
+        val myPubkey = signer?.getPublicKeyAsync()
             ?: return responseOf(listOf(), giftWrapResponse, legacyResponse)
 
         val threadsByPartner = mutableMapOf<String, MutableList<NostrDirectMessage>>()

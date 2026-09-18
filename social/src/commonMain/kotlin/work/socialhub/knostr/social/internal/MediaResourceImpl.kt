@@ -123,13 +123,13 @@ private class DirectMediaEventPublisherImpl(
         val signer = nostr.signer()
             ?: throw NostrException(signerRequiredMessage)
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.TEXT_NOTE,
             tags = tags,
             content = content,
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }
@@ -367,13 +367,13 @@ class MediaResourceImpl private constructor(
         if (description != null) tags.add(listOf("alt", description))
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.FILE_METADATA,
             tags = tags,
             content = description ?: "",
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }
@@ -409,10 +409,10 @@ class MediaResourceImpl private constructor(
         return response.withData(metadata)
     }
 
-    private fun createHttpAuthEvent(url: String, method: String): work.socialhub.knostr.entity.NostrEvent {
+    private suspend fun createHttpAuthEvent(url: String, method: String): work.socialhub.knostr.entity.NostrEvent {
         val signer = nostr.signer()!!
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = 27235, // NIP-98 HTTP Auth
             tags = listOf(
@@ -421,7 +421,7 @@ class MediaResourceImpl private constructor(
             ),
             content = "",
         )
-        return signer.sign(unsigned)
+        return signer.signAsync(unsigned)
     }
 
     override fun uploadToConfiguredServerBlocking(

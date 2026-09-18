@@ -58,7 +58,7 @@ class FeedResourceImpl(
         }
 
         val followFilter = NostrFilter(
-            authors = listOf(signer.getPublicKey()),
+            authors = listOf(signer.getPublicKeyAsync()),
             kinds = listOf(EventKind.FOLLOW_LIST),
             limit = 1,
         )
@@ -186,7 +186,7 @@ class FeedResourceImpl(
             ?: throw NostrException("Signer is required to get mentions")
 
         val filter = NostrFilter(
-            pTags = listOf(signer.getPublicKey()),
+            pTags = listOf(signer.getPublicKeyAsync()),
             kinds = listOf(EventKind.TEXT_NOTE),
             since = since,
             until = until,
@@ -531,13 +531,13 @@ class FeedResourceImpl(
         }
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.TEXT_NOTE,
             tags = allTags,
             content = content,
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }
@@ -573,13 +573,13 @@ class FeedResourceImpl(
         }
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.TEXT_NOTE,
             tags = allTags,
             content = content,
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         val published = nostr.events().publishEvent(signed)
         if (published.data) {
             rememberInteraction(signed.id, replyToEventId, InteractionKind.REPLY)
@@ -631,13 +631,13 @@ class FeedResourceImpl(
         reposted?.pubkey?.takeIf { it.isNotBlank() }?.let { tags.add(listOf("p", it)) }
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.REPOST,
             tags = tags,
             content = "",
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         val published = nostr.events().publishEvent(signed)
         if (published.data) {
             rememberInteraction(signed.id, eventId, InteractionKind.REPOST)
@@ -679,13 +679,13 @@ class FeedResourceImpl(
         }
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.TEXT_NOTE,
             tags = tags,
             content = comment,
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }

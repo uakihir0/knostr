@@ -68,12 +68,12 @@ class UserResourceImpl(
             ?: throw NostrException("Signer is required to update profile")
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.METADATA,
             content = InternalUtility.toJson(profile),
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         cachePut(SocialDataBatch(users = listOf(SocialMapper.toUser(signed))))
         return Response(signed)
@@ -84,7 +84,7 @@ class UserResourceImpl(
             ?: throw NostrException("Signer is required to follow")
 
         // Get current follow list
-        val currentFollowing = getFollowingTags(signer.getPublicKey())
+        val currentFollowing = getFollowingTags(signer.getPublicKeyAsync())
             .requireCompleteData("update following list")
 
         // Add the new pubkey if not already following
@@ -94,13 +94,13 @@ class UserResourceImpl(
         }
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.FOLLOW_LIST,
             tags = tags,
             content = "",
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }
@@ -110,18 +110,18 @@ class UserResourceImpl(
             ?: throw NostrException("Signer is required to unfollow")
 
         // Get current follow list and remove the pubkey
-        val currentFollowing = getFollowingTags(signer.getPublicKey())
+        val currentFollowing = getFollowingTags(signer.getPublicKeyAsync())
             .requireCompleteData("update following list")
         val tags = currentFollowing.filter { !(it.size >= 2 && it[0] == "p" && it[1] == pubkey) }
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.FOLLOW_LIST,
             tags = tags,
             content = "",
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }
@@ -222,13 +222,13 @@ class UserResourceImpl(
         }
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.USER_STATUS,
             tags = tags,
             content = content,
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }
@@ -274,7 +274,7 @@ class UserResourceImpl(
 
     override suspend fun getRelationship(pubkey: String): Response<NostrRelationship> {
         val signer = nostr.signer()
-        val myPubkey = signer?.getPublicKey()
+        val myPubkey = signer?.getPublicKeyAsync()
 
         val relationship = NostrRelationship()
         val sourceResponses = mutableListOf<Response<*>>()
