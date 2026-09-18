@@ -78,7 +78,7 @@ knostr/
 |---------|---------|
 | `entity/` | Data models: `NostrEvent`, `NostrFilter`, `NostrProfile`, `Nip05Result`, `Nip19Entity` |
 | `relay/` | WebSocket relay management: `RelayConnection`, `RelayPool`, `RelayMessage`, `Subscription` |
-| `signing/` | Event signing + encryption: `NostrSigner` interface, `Secp256k1Signer` (NIP-44, NIP-04) |
+| `signing/` | Event signing + encryption: `NostrSigner` interface (sync + async variants), `Secp256k1Signer` (NIP-44, NIP-04), `BunkerSigner` (NIP-46), `Nip07Signer` (JS) |
 | `nip44/` | NIP-44 v2 encryption: `Nip44` (ECDH + HKDF + ChaCha20 + HMAC-SHA256), `Nip44Padding` |
 | `nip04/` | NIP-04 legacy encryption: `Nip04` (ECDH + AES-256-CBC) |
 | `api/` | Resource interfaces: `EventResource`, `RelayResource`, `NipResource` |
@@ -206,8 +206,16 @@ In `core/src/commonTest/kotlin/work/socialhub/knostr/`:
 
 **Note**: Tests use `runBlocking` with a separate `CoroutineScope(Dispatchers.Default + SupervisorJob())` for relay connections because WebSocket connections are long-lived and block `coroutineScope`.
 
+## Async signers
+
+`NostrSigner` has both synchronous members and `*Async` variants. A signer with
+remote key material (NIP-07 extension, NIP-46 bunker) overrides only the
+`*Async` variants; the SDK calls those everywhere, including NIP-42 AUTH.
+`Secp256k1Signer` inherits the async defaults from its synchronous
+implementation. See README "Signing with an External Key".
+
 ## Scope / Not Yet Implemented
 
-- NIP-42 relay authentication
+- NIP-42 relay authentication is auto-responded through the signer, but there
+  is no API to answer a challenge manually
 - NIP-65 relay list management
-- NIP-07 browser extension (JS)
