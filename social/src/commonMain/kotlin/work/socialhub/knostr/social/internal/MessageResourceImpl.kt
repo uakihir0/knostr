@@ -1,5 +1,6 @@
 package work.socialhub.knostr.social.internal
 
+import kotlinx.coroutines.CancellationException
 import work.socialhub.knostr.EventKind
 import work.socialhub.knostr.Nostr
 import work.socialhub.knostr.NostrException
@@ -149,6 +150,8 @@ class MessageResourceImpl(
                 event = giftWrap,
                 isLegacy = false,
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             null // Failed to unwrap — skip
         }
@@ -273,6 +276,8 @@ class MessageResourceImpl(
                 event = event,
                 isLegacy = true,
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             null
         }

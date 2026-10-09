@@ -360,6 +360,8 @@ class RelayPool {
                 try {
                     val signed = createAuthEvent(relayUrl, challenge) ?: return@launch
                     connection.sendAuth(signed)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     onErrorCallback?.invoke(relayUrl, e)
                 }
