@@ -52,13 +52,13 @@ class ArticleResourceImpl(
         }
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.LONG_FORM,
             tags = tags,
             content = content,
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }
@@ -98,7 +98,7 @@ class ArticleResourceImpl(
 
         // Find the article event to get its ID
         val filter = NostrFilter(
-            authors = listOf(signer.getPublicKey()),
+            authors = listOf(signer.getPublicKeyAsync()),
             kinds = listOf(EventKind.LONG_FORM),
             dTags = listOf(identifier),
             limit = 1,

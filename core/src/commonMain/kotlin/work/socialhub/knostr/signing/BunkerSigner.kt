@@ -246,7 +246,7 @@ class BunkerSigner private constructor(
     /**
      * Sign an event asynchronously via the remote bunker.
      */
-    suspend fun signAsync(event: UnsignedEvent): NostrEvent {
+    override suspend fun signAsync(event: UnsignedEvent): NostrEvent {
         val eventJson = buildJsonArray {
             add(JsonPrimitive(0))
             add(JsonPrimitive(event.pubkey.ifEmpty { remotePubkey }))
@@ -311,22 +311,22 @@ class BunkerSigner private constructor(
     }
 
     /** Encrypt using NIP-44 via the remote bunker */
-    suspend fun nip44EncryptAsync(plaintext: String, recipientPubkey: String): String {
+    override suspend fun nip44EncryptAsync(plaintext: String, recipientPubkey: String): String {
         return sendRequest("nip44_encrypt", listOf(recipientPubkey, plaintext))
     }
 
     /** Decrypt using NIP-44 via the remote bunker */
-    suspend fun nip44DecryptAsync(payload: String, senderPubkey: String): String {
+    override suspend fun nip44DecryptAsync(payload: String, senderPubkey: String): String {
         return sendRequest("nip44_decrypt", listOf(senderPubkey, payload))
     }
 
     /** Encrypt using NIP-04 via the remote bunker */
-    suspend fun nip04EncryptAsync(plaintext: String, recipientPubkey: String): String {
+    override suspend fun nip04EncryptAsync(plaintext: String, recipientPubkey: String): String {
         return sendRequest("nip04_encrypt", listOf(recipientPubkey, plaintext))
     }
 
     /** Decrypt using NIP-04 via the remote bunker */
-    suspend fun nip04DecryptAsync(ciphertext: String, senderPubkey: String): String {
+    override suspend fun nip04DecryptAsync(ciphertext: String, senderPubkey: String): String {
         return sendRequest("nip04_decrypt", listOf(senderPubkey, ciphertext))
     }
 

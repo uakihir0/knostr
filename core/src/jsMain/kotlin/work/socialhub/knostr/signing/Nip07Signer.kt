@@ -58,7 +58,7 @@ class Nip07Signer private constructor(
     /**
      * Sign an event asynchronously using the NIP-07 extension.
      */
-    suspend fun signAsync(event: UnsignedEvent): NostrEvent {
+    override suspend fun signAsync(event: UnsignedEvent): NostrEvent {
         val nostr = windowNostr
             ?: throw NostrException("NIP-07 extension not available")
 
@@ -113,28 +113,28 @@ class Nip07Signer private constructor(
     }
 
     /** Encrypt plaintext using NIP-44 via the browser extension */
-    suspend fun nip44EncryptAsync(plaintext: String, recipientPubkey: String): String {
+    override suspend fun nip44EncryptAsync(plaintext: String, recipientPubkey: String): String {
         val nostr = windowNostr
             ?: throw NostrException("NIP-07 extension not available")
         return (nostr.nip44.encrypt(recipientPubkey, plaintext) as Promise<String>).await()
     }
 
     /** Decrypt NIP-44 payload via the browser extension */
-    suspend fun nip44DecryptAsync(payload: String, senderPubkey: String): String {
+    override suspend fun nip44DecryptAsync(payload: String, senderPubkey: String): String {
         val nostr = windowNostr
             ?: throw NostrException("NIP-07 extension not available")
         return (nostr.nip44.decrypt(senderPubkey, payload) as Promise<String>).await()
     }
 
     /** Encrypt plaintext using NIP-04 via the browser extension */
-    suspend fun nip04EncryptAsync(plaintext: String, recipientPubkey: String): String {
+    override suspend fun nip04EncryptAsync(plaintext: String, recipientPubkey: String): String {
         val nostr = windowNostr
             ?: throw NostrException("NIP-07 extension not available")
         return (nostr.nip04.encrypt(recipientPubkey, plaintext) as Promise<String>).await()
     }
 
     /** Decrypt NIP-04 payload via the browser extension */
-    suspend fun nip04DecryptAsync(ciphertext: String, senderPubkey: String): String {
+    override suspend fun nip04DecryptAsync(ciphertext: String, senderPubkey: String): String {
         val nostr = windowNostr
             ?: throw NostrException("NIP-07 extension not available")
         return (nostr.nip04.decrypt(senderPubkey, ciphertext) as Promise<String>).await()

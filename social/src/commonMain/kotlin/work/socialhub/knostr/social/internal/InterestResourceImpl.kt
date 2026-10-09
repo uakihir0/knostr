@@ -55,7 +55,7 @@ class InterestResourceImpl(
             ?: throw NostrException("Signer is required to get interest list")
 
         val filter = NostrFilter(
-            authors = listOf(signer.getPublicKey()),
+            authors = listOf(signer.getPublicKeyAsync()),
             kinds = listOf(EventKind.INTEREST_LIST),
             limit = 1,
         )
@@ -68,13 +68,13 @@ class InterestResourceImpl(
         tags: List<List<String>>,
     ): Response<NostrEvent> {
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.INTEREST_LIST,
             tags = tags,
             content = "",
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }

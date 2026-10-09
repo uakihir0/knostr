@@ -53,7 +53,7 @@ class BookmarkResourceImpl(
             ?: throw NostrException("Signer is required to get bookmarks")
 
         val filter = NostrFilter(
-            authors = listOf(signer.getPublicKey()),
+            authors = listOf(signer.getPublicKeyAsync()),
             kinds = listOf(EventKind.BOOKMARK_LIST),
             limit = 1,
         )
@@ -66,13 +66,13 @@ class BookmarkResourceImpl(
         tags: List<List<String>>,
     ): Response<NostrEvent> {
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.BOOKMARK_LIST,
             tags = tags,
             content = "",
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }

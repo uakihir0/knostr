@@ -54,7 +54,7 @@ class MuteResourceImpl(
             ?: throw NostrException("Signer is required to get mute list")
 
         val filter = NostrFilter(
-            authors = listOf(signer.getPublicKey()),
+            authors = listOf(signer.getPublicKeyAsync()),
             kinds = listOf(EventKind.MUTE_LIST),
             limit = 1,
         )
@@ -67,13 +67,13 @@ class MuteResourceImpl(
         tags: List<List<String>>,
     ): Response<NostrEvent> {
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.MUTE_LIST,
             tags = tags,
             content = "",
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }

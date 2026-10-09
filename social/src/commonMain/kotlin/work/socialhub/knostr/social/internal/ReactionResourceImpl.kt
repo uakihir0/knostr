@@ -33,7 +33,7 @@ internal class ReactionResourceImpl(
             ?: throw NostrException("Signer is required to react")
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.REACTION,
             tags = listOf(
@@ -42,7 +42,7 @@ internal class ReactionResourceImpl(
             ),
             content = content,
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         val published = nostr.events().publishEvent(signed)
         if (published.data && SocialMapper.isLike(content)) {
             SocialStats.adjustCached(socialCache, enrichment, eventId) {
@@ -81,7 +81,7 @@ internal class ReactionResourceImpl(
             ?: throw NostrException("Signer is required to react")
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.REACTION,
             tags = listOf(
@@ -91,7 +91,7 @@ internal class ReactionResourceImpl(
             ),
             content = ":$shortcode:",
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }
@@ -137,7 +137,7 @@ internal class ReactionResourceImpl(
 
         // Find own reaction for this event
         val filter = NostrFilter(
-            authors = listOf(signer.getPublicKey()),
+            authors = listOf(signer.getPublicKeyAsync()),
             kinds = listOf(EventKind.REACTION),
             eTags = listOf(eventId),
         )

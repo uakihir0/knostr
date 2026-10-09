@@ -67,6 +67,35 @@ val nostr = NostrFactory.instance(
 nostr.relays().connect()
 ```
 
+### Signing with an External Key (Core)
+
+A signer whose key material lives outside the process — a NIP-07 browser
+extension, a NIP-46 bunker, a hardware wallet — cannot answer synchronously.
+Such a signer implements the `*Async` variants of `NostrSigner` and leaves the
+synchronous ones throwing; every write path in the SDK, including NIP-42 relay
+authentication, calls the async variants.
+
+```kotlin
+class ExternalSigner : NostrSigner {
+    override fun getPublicKey(): String = error("async only")
+    override fun sign(event: UnsignedEvent): NostrEvent = error("async only")
+    // ... the remaining synchronous members throw as well
+
+    override suspend fun getPublicKeyAsync(): String = remote.getPublicKey()
+
+    override suspend fun signAsync(event: UnsignedEvent): NostrEvent =
+        remote.sign(event)
+}
+
+val nostr = NostrFactory.instance(
+    NostrConfig().also {
+        it.relayUrls = listOf("wss://relay.damus.io")
+        it.signer = ExternalSigner()
+        it.autoAuth = true // NIP-42 AUTH is signed through the async path
+    },
+)
+```
+
 ### Querying Events (Core)
 
 ```kotlin

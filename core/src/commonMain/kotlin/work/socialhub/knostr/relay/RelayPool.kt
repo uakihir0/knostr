@@ -355,26 +355,38 @@ class RelayPool {
         onAuthCallback?.invoke(relayUrl, challenge)
 
         if (autoAuth) {
-            val s = signer ?: return
+            if (signer == null) return
             poolScope?.launch {
                 try {
-                    val unsigned = UnsignedEvent(
-                        pubkey = s.getPublicKey(),
-                        createdAt = Clock.System.now().epochSeconds,
-                        kind = EventKind.AUTH,
-                        tags = listOf(
-                            listOf("relay", relayUrl),
-                            listOf("challenge", challenge),
-                        ),
-                        content = "",
-                    )
-                    val signed = s.sign(unsigned)
+                    val signed = createAuthEvent(relayUrl, challenge) ?: return@launch
                     connection.sendAuth(signed)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     onErrorCallback?.invoke(relayUrl, e)
                 }
             }
         }
+    }
+
+    /**
+     * Build the NIP-42 AUTH event for a relay challenge, or null when the pool
+     * has no signer. Kept as its own suspend function so the async signing path
+     * can be exercised without a live socket.
+     */
+    internal suspend fun createAuthEvent(relayUrl: String, challenge: String): NostrEvent? {
+        val s = signer ?: return null
+        val unsigned = UnsignedEvent(
+            pubkey = s.getPublicKeyAsync(),
+            createdAt = Clock.System.now().epochSeconds,
+            kind = EventKind.AUTH,
+            tags = listOf(
+                listOf("relay", relayUrl),
+                listOf("challenge", challenge),
+            ),
+            content = "",
+        )
+        return s.signAsync(unsigned)
     }
 
     private fun handleEvent(subscriptionId: String, event: NostrEvent) {

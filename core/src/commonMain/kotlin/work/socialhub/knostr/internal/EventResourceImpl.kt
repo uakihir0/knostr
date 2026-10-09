@@ -208,13 +208,13 @@ class EventResourceImpl(
             ?: throw NostrException("Signer is required to delete events")
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.EVENT_DELETION,
             tags = listOf(listOf("e", eventId)),
             content = reason,
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         return publishEvent(signed)
     }
 

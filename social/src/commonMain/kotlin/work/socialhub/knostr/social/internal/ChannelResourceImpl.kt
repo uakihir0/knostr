@@ -33,13 +33,13 @@ class ChannelResourceImpl(
 
         val metadata = ChannelMetadata(name, about, picture)
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.CHANNEL_CREATE,
             tags = listOf(),
             content = InternalUtility.toJson(metadata),
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }
@@ -57,13 +57,13 @@ class ChannelResourceImpl(
         )
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.CHANNEL_METADATA,
             tags = listOf(listOf("e", channelId)),
             content = InternalUtility.toJson(metadata),
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }
@@ -73,13 +73,13 @@ class ChannelResourceImpl(
             ?: throw NostrException("Signer is required to send channel message")
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.CHANNEL_MESSAGE,
             tags = listOf(listOf("e", channelId, "", "root")),
             content = content,
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }
@@ -236,7 +236,7 @@ class ChannelResourceImpl(
             ?: throw NostrException("Signer is required to get public chats list")
 
         val filter = NostrFilter(
-            authors = listOf(signer.getPublicKey()),
+            authors = listOf(signer.getPublicKeyAsync()),
             kinds = listOf(EventKind.PUBLIC_CHATS_LIST),
             limit = 1,
         )
@@ -249,13 +249,13 @@ class ChannelResourceImpl(
         tags: List<List<String>>,
     ): Response<NostrEvent> {
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.PUBLIC_CHATS_LIST,
             tags = tags,
             content = "",
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }

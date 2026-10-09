@@ -55,13 +55,13 @@ class ZapResourceImpl(
         }
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.ZAP_REQUEST,
             tags = tags,
             content = message,
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         return Response(signed)
     }
 

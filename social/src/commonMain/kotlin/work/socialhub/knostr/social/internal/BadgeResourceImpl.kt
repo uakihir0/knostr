@@ -36,13 +36,13 @@ class BadgeResourceImpl(
         if (thumbImage.isNotEmpty()) tags.add(listOf("thumb", thumbImage))
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.BADGE_DEFINITION,
             tags = tags,
             content = "",
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }
@@ -55,20 +55,20 @@ class BadgeResourceImpl(
             ?: throw NostrException("Signer is required to award badge")
 
         val tags = mutableListOf(
-            listOf("a", "${EventKind.BADGE_DEFINITION}:${signer.getPublicKey()}:$badgeDTag"),
+            listOf("a", "${EventKind.BADGE_DEFINITION}:${signer.getPublicKeyAsync()}:$badgeDTag"),
         )
         for (pubkey in recipientPubkeys) {
             tags.add(listOf("p", pubkey))
         }
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.BADGE_AWARD,
             tags = tags,
             content = "",
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }
@@ -86,13 +86,13 @@ class BadgeResourceImpl(
         }
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.PROFILE_BADGES,
             tags = tags,
             content = "",
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }

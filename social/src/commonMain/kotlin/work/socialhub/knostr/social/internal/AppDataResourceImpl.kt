@@ -20,13 +20,13 @@ class AppDataResourceImpl(
             ?: throw NostrException("Signer is required to set app data")
 
         val unsigned = UnsignedEvent(
-            pubkey = signer.getPublicKey(),
+            pubkey = signer.getPublicKeyAsync(),
             createdAt = Clock.System.now().epochSeconds,
             kind = EventKind.APP_SPECIFIC_DATA,
             tags = listOf(listOf("d", dTag)),
             content = content,
         )
-        val signed = signer.sign(unsigned)
+        val signed = signer.signAsync(unsigned)
         nostr.events().publishEvent(signed)
         return Response(signed)
     }
@@ -34,7 +34,7 @@ class AppDataResourceImpl(
     override suspend fun getAppData(dTag: String): Response<String?> {
         val signer = nostr.signer()
             ?: throw NostrException("Signer is required to get own app data")
-        return getAppDataByPubkey(signer.getPublicKey(), dTag)
+        return getAppDataByPubkey(signer.getPublicKeyAsync(), dTag)
     }
 
     override suspend fun getAppDataByPubkey(pubkey: String, dTag: String): Response<String?> {
